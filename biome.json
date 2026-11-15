@@ -1,0 +1,19 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "root": true,
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": { "includes": ["**", "!dist"] },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "overrides": [
+    { "includes": ["src/wire/text.ts", "test/fake/oscar-rooms.ts", "test/unit/wire/text.test.ts"], "linter": { "rules": { "complexity": { "noUselessEscapeInRegex": "off" } } } },
+    { "includes": ["test/unit/wire/auth.test.ts"], "linter": { "rules": { "complexity": { "useLiteralKeys": "off" } } } },
+    { "includes": ["test/fake/oscar-rooms.ts"], "linter": { "rules": { "complexity": { "useOptionalChain": "off" } } } },
+    { "includes": ["test/unit/wire/chatroom.test.ts", "test/unit/wire/chatnav.test.ts"], "linter": { "rules": { "style": { "noNonNullAssertion": "off" } } } },
+    { "includes": ["test/unit/wire/bytes-tlv.test.ts", "test/unit/wire/flap-snac.test.ts"], "linter": { "rules": { "style": { "useTemplate": "off" } } } },
+    { "includes": ["src/wire/text.ts", "test/fake/oscar-rooms.ts"], "linter": { "rules": { "suspicious": { "noControlCharactersInRegex": "off" } } } },
+    { "includes": ["src/wire/chatroom.ts", "test/unit/wire/room-pacer.test.ts"], "linter": { "rules": { "suspicious": { "useIterableCallbackReturn": "off" } } } },
+    { "includes": ["src/client/sign-on.ts"], "linter": { "rules": { "correctness": { "useHookAtTopLevel": "off" } } } }
+  ]
+}

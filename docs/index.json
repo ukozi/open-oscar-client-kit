@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "title": "Start",
+      "pages": [{ "slug": "quickstart", "title": "Quickstart", "file": "quickstart.md" }]
+    },
+    {
+      "title": "Guides",
+      "pages": [
+        { "slug": "guides/staying-signed-on", "title": "Staying signed on", "file": "guides/staying-signed-on.md" },
+        { "slug": "guides/buddy-list", "title": "The buddy list", "file": "guides/buddy-list.md" },
+        { "slug": "guides/rate-limits", "title": "Rate limits and warnings", "file": "guides/rate-limits.md" },
+        { "slug": "guides/bot-etiquette", "title": "Bot etiquette", "file": "guides/bot-etiquette.md" }
+      ]
+    },
+    {
+      "title": "Protocol",
+      "pages": [
+        { "slug": "protocol/overview", "title": "Protocol overview", "file": "protocol/overview.md" },
+        { "slug": "protocol/flap", "title": "FLAP", "file": "protocol/flap.md" },
+        { "slug": "protocol/snac", "title": "SNAC", "file": "protocol/snac.md" },
+        { "slug": "protocol/tlv", "title": "TLV", "file": "protocol/tlv.md" },
+        { "slug": "protocol/sign-on", "title": "Sign-on", "file": "protocol/sign-on.md" },
+        { "slug": "protocol/icbm", "title": "ICBM", "file": "protocol/icbm.md" },
+        { "slug": "protocol/feedbag", "title": "Feedbag", "file": "protocol/feedbag.md" },
+        { "slug": "protocol/quirks", "title": "Quirks", "file": "protocol/quirks.md" }
+      ]
+    },
+    {
+      "title": "Porting",
+      "pages": [
+        { "slug": "porting/overview", "title": "Porting overview", "file": "porting/overview.md" },
+        { "slug": "porting/vectors", "title": "Byte vectors", "file": "porting/vectors.md" },
+        { "slug": "porting/test-server", "title": "The test server", "file": "porting/test-server.md" },
+        { "slug": "porting/driver-protocol", "title": "The driver protocol", "file": "porting/driver-protocol.md" },
+        { "slug": "porting/suite", "title": "The suite", "file": "porting/suite.md" },
+        { "slug": "ports", "title": "Ports", "file": "ports.md" }
+      ]
+    },
+    {
+      "title": "Reference",
+      "pages": [{ "slug": "api", "title": "API reference", "file": "api/README.md", "generated": true }]
+    }
+  ]
+}

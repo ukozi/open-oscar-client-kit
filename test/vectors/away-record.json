@@ -1,0 +1,75 @@
+{
+  "source": "away record, format version 1: feedbag items of class 0x0C41 as encodeFeedbagItems writes them",
+  "vectors": [
+    {
+      "name": "away record item, placeholder",
+      "inputs": {
+        "itemId": "0x5a17",
+        "seq": "0",
+        "writer": "0x1234abcd",
+        "away": "false",
+        "text": "",
+        "source": "phone",
+        "paused": "false",
+        "setAt": "0"
+      },
+      "hex": "000c6578616d706c652e6177617900005a170c4100347a010001017a020004000000007a0300041234abcd7a040001007a0500007a06000570686f6e657a070001007a08000400000000"
+    },
+    {
+      "name": "away record item, away from a phone, paused",
+      "inputs": {
+        "itemId": "0x5a17",
+        "seq": "3",
+        "writer": "0x89abcdef",
+        "away": "true",
+        "text": "Out to lunch, back at %t",
+        "source": "phone",
+        "paused": "true",
+        "setAt": "1793000000"
+      },
+      "hex": "000c6578616d706c652e6177617900005a170c41004c7a010001017a020004000000037a03000489abcdef7a040001017a0500184f757420746f206c756e63682c206261636b2061742025747a06000570686f6e657a070001017a0800046adf0240"
+    },
+    {
+      "name": "away record item, away from a desktop, UTF-8 text",
+      "inputs": {
+        "itemId": "0x4000",
+        "seq": "4",
+        "writer": "0x00000001",
+        "away": "true",
+        "text": "Gone 🌮 %n",
+        "source": "desktop",
+        "paused": "false",
+        "setAt": "1793000600"
+      },
+      "hex": "000c6578616d706c652e61776179000040000c4100427a010001017a020004000000047a030004000000017a040001017a05000c476f6e6520f09f8cae20256e7a0600076465736b746f707a070001007a0800046adf0498"
+    },
+    {
+      "name": "away record item, auto-away",
+      "inputs": {
+        "itemId": "0x7fff",
+        "seq": "5",
+        "writer": "0xffffffff",
+        "away": "true",
+        "text": "I am away from my computer right now.",
+        "source": "auto",
+        "paused": "false",
+        "setAt": "1793001200"
+      },
+      "hex": "000c6578616d706c652e6177617900007fff0c4100587a010001017a020004000000057a030004ffffffff7a040001017a0500254920616d20617761792066726f6d206d7920636f6d7075746572207269676874206e6f772e7a0600046175746f7a070001007a0800046adf06f0"
+    },
+    {
+      "name": "away record item, back",
+      "inputs": {
+        "itemId": "0x5a17",
+        "seq": "6",
+        "writer": "0x89abcdef",
+        "away": "false",
+        "text": "",
+        "source": "phone",
+        "paused": "false",
+        "setAt": "0"
+      },
+      "hex": "000c6578616d706c652e6177617900005a170c4100347a010001017a020004000000067a03000489abcdef7a040001007a0500007a06000570686f6e657a070001007a08000400000000"
+    }
+  ]
+}

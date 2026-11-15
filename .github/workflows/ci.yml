@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+
+  core:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      # The guard and its strings come from the base branch, so a pull request cannot change them.
+      - run: |
+          mkdir -p "$RUNNER_TEMP/base/scripts" "$RUNNER_TEMP/base/lib/cli"
+          echo '{ "type": "module" }' > "$RUNNER_TEMP/base/package.json"
+          git show "origin/${BASE_REF}:scripts/core-guard.mjs" > "$RUNNER_TEMP/base/scripts/core-guard.mjs"
+          git show "origin/${BASE_REF}:lib/cli/text.ts" > "$RUNNER_TEMP/base/lib/cli/text.ts"
+          node "$RUNNER_TEMP/base/scripts/core-guard.mjs" "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: docker build -t test-server .
+      - run: docker run -d --rm -p 5190:5190 --name test-server test-server
+      - run: pnpm install --frozen-lockfile && pnpm build && node scripts/image-smoke.mjs
+      - if: failure()
+        run: docker logs test-server

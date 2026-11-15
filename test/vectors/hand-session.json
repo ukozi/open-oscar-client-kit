@@ -1,0 +1,21 @@
+{
+  "source": "Hand-assembled from the wire layouts of open-oscar-server 7af2464fb060bd61989cf21e9012ee1a4b77d9f9. Not produced by the server's marshaller.",
+  "vectors": [
+    { "name": "client versions body, BOS list", "hex": "0001000100020001000300010004000100130001" },
+    { "name": "client online body, BOS list", "hex": "00010001011006290002000101100629000300010110062900040001011006290013000101100629" },
+    { "name": "client versions body, BOS list with BART", "hex": "000100010002000100030001000400010013000100100001", "note": "the five BOS food groups, then BART 0x0010, each at version 1" },
+    { "name": "client online body, BOS list with BART", "hex": "000100010110062900020001011006290003000101100629000400010110062900130001011006290010000101100629" },
+    { "name": "locate set info body, UTF-8 and chat capabilities", "hex": "000500200946134e4c7f11d18222444553540000748f2420628711d18222444553540000", "note": "CapUTF8Messages then CapChat" },
+    { "name": "locate rights reply body", "hex": "0001000203e80002000203e80003000203e80004000203e80005000203e8" },
+    { "name": "icbm parameter reply body", "hex": "006400000003020003e703e700000000", "note": "slots 100, flags 3, max incoming 512, evil 999 and 999, interval 0" },
+    { "name": "feedbag rights reply body", "hex": "0003000200c80004002a003d003d00640064000100010032000000000003000000000000008000ff001400c800010000000100c80006000200c8000c000200c8" },
+    { "name": "feedbag reply body, six items", "hex": "0000060000000000000001000800c8000400020001000742756464696573000100000001000800c80004000b000a00096368696d72646576320001000a0000000b013100074465762054776f0005616c6963650001000b000000000004576f726b000200000001000400c800000000000000050009000800cd0004deadbeef6ab13b80", "note": "root (order 2,1); group Buddies id 1 (order 11,10); buddy chimrdev2 item 10 alias Dev Two; buddy alice item 11; group Work id 2 (empty order); class 0x0009 item 5 with TLV 0x00CD" },
+    { "name": "feedbag reply body, empty", "hex": "00000000000000" },
+    { "name": "feedbag item, buddy with alias", "hex": "00096368696d72646576320001000a0000000b013100074465762054776f" },
+    { "name": "feedbag status body, two successes", "hex": "00000000" },
+    { "name": "buddy arrived body, away and idle", "hex": "0b4368696d7220446576203200640004000300046ab13b80000100020030000600040000000000040002000c", "note": "Chimr Dev 2, warn 100, signed on 1790000000, flags 0x0030, idle 12 minutes" },
+    { "name": "buddy arrived body, plain", "hex": "0b4368696d7220446576203200000003000300046ab13b800001000200100006000400000000" },
+    { "name": "buddy departed body, display name", "hex": "0b4368696d7220446576203200000001000100020000" },
+    { "name": "icbm error body, sender blocks recipient", "hex": "0010" }
+  ]
+}

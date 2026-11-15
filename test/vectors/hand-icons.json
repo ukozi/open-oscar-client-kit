@@ -1,0 +1,21 @@
+{
+  "source": "Hand-assembled from the wire layouts of open-oscar-server 7af2464fb060bd61989cf21e9012ee1a4b77d9f9. Not produced by the server's marshaller.",
+  "vectors": [
+    { "name": "bart ids, an icon then a status string", "hex": "000101101ac2109d47dbc72551f71df89d01ed180002040700036272620000" },
+    { "name": "bart ids, a status string only", "hex": "0002040700036272620000" },
+    { "name": "bart ids, an icon not yet uploaded", "hex": "000141101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart ids, the cleared icon", "hex": "000100050201d20472" },
+    { "name": "arrival body, Bob with an icon and a status string", "hex": "03426f6200000003000100020010000300046ab13b80001d001f000101101ac2109d47dbc72551f71df89d01ed180002040700036272620000" },
+    { "name": "feedbag item, icon item 9 with a real icon", "hex": "000131000000090014001600d5001201101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "feedbag item, icon item 9 cleared", "hex": "000131000000090014000b00d5000700050201d20472" },
+    { "name": "feedbag item, icon item 9 with another attribute before the icon", "hex": "000131000000090014001a0131000000d5001201101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart notice body, upload wanted", "hex": "000141101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart notice body, already held", "hex": "000101101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart upload body, type 1, GIF89a", "hex": "00010006474946383961" },
+    { "name": "bart upload reply body, success", "hex": "00000101101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart upload reply body, code 4", "hex": "04000101101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart download body, bob", "hex": "03626f6201000101101ac2109d47dbc72551f71df89d01ed18" },
+    { "name": "bart download reply body, bob, GIF89a", "hex": "03626f62000101101ac2109d47dbc72551f71df89d01ed180006474946383961" },
+    { "name": "bart download reply body, bob, no data", "hex": "03626f62000101101ac2109d47dbc72551f71df89d01ed180000" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "source": "Hand-assembled from the wire layouts of open-oscar-server 7af2464fb060bd61989cf21e9012ee1a4b77d9f9. Not produced by the server's marshaller.",
+  "vectors": [
+    { "name": "admin email query body", "hex": "00110000" },
+    { "name": "admin format body, Chimr Dev 2", "hex": "0001000b4368696d72204465762032" },
+    { "name": "admin change reply body, success, Chimr Dev 2", "hex": "000300010001000b4368696d72204465762032" },
+    { "name": "admin change reply body, failure 0x0001", "hex": "0003000200080002000100040000" },
+    { "name": "admin info reply body, email dev2@example.com", "hex": "000300010011001064657632406578616d706c652e636f6d" },
+    { "name": "admin info reply body, no email", "hex": "0003000100110000" },
+    { "name": "admin err body, code 8", "hex": "0008" }
+  ]
+}

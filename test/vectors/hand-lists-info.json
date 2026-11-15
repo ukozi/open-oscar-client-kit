@@ -1,0 +1,26 @@
+{
+  "source": "Hand-assembled from the wire layouts of open-oscar-server 7af2464fb060bd61989cf21e9012ee1a4b77d9f9. Not produced by the server's marshaller.",
+  "vectors": [
+    { "name": "feedbag items body, buddy bob with alias Bobby (group 1, item 5), group Buddies with order 1, 5", "hex": "0003626f62000100050000000901310005426f626279000742756464696573000100000001000800c8000400010005" },
+    { "name": "feedbag item, privacy item 7 in deny-some mode", "hex": "0000000000070004000500ca000104" },
+    { "name": "feedbag item, deny item 8 for carol", "hex": "00056361726f6c0000000800030000" },
+    { "name": "feedbag item, empty buddy preferences item 9", "hex": "00000000000900050000" },
+    { "name": "feedbag item, buddy preferences with typing disabled", "hex": "0000000000090005001000c900040000000100d6000400400001" },
+    { "name": "feedbag item, buddy preferences with typing enabled", "hex": "0000000000090005001000c900040040000100d6000400400001" },
+    { "name": "feedbag status body, success then authorisation required", "hex": "0000000e" },
+    { "name": "locate set info body, profile", "hex": "0001001f746578742f616f6c7274663b20636861727365743d2275732d6173636969220002001d3c423e68693c2f423e2063616626233233333b2026233132383531323b", "note": "profile <B>hi</B> caf&#233; &#128512;" },
+    { "name": "locate set info body, away with its type", "hex": "0003001f746578742f616f6c7274663b20636861727365743d2275732d6173636969220004000b627262202623393734393b", "note": "away brb &#9749;" },
+    { "name": "locate set info body, away cleared with its type", "hex": "0003001f746578742f616f6c7274663b20636861727365743d2275732d61736369692200040000" },
+    { "name": "user info query body, profile and away, bob", "hex": "0000000303626f62" },
+    { "name": "user info query body, away only, bob", "hex": "0000000203626f62" },
+    { "name": "user info reply body, Bob away and idle with a profile", "hex": "03426f6200640004000100020030000300046ab13b8000040002000e00060004000000000001001f746578742f616f6c7274663b20636861727365743d2275732d6173636969220002000963616626233233333b0003001f746578742f616f6c7274663b20636861727365743d2275732d61736369692200040003627262", "note": "warn 100, flags 0x0030, signed on 1790000000, idle 14, profile caf&#233;, away brb" },
+    { "name": "status body, invisible", "hex": "0006000400000100" },
+    { "name": "status body, visible", "hex": "0006000400000000" },
+    { "name": "idle body, 600 seconds", "hex": "00000258" },
+    { "name": "warning notice body, level 10% from Bob", "hex": "006403426f6200000000" },
+    { "name": "warning notice body, level 3%, anonymous", "hex": "001e" },
+    { "name": "warn request body, normal, bob", "hex": "000003626f62" },
+    { "name": "warn reply body, 10% applied, level 10%", "hex": "00640064" },
+    { "name": "self info body, Alice invisible at warn level 5%", "hex": "05416c69636500320003000100020010000300046ab13b800006000400000100" }
+  ]
+}

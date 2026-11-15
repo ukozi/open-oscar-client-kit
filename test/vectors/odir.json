@@ -1,0 +1,30 @@
+{
+  "source": "Produced by the server's marshaller: wire.MarshalBE of open-oscar-server 1ab851e83e58c7c0f8a68c670676b95fa43451c9, from a Go test under foodgroup/. The inputs are the values marshalled.",
+  "vectors": [
+    {
+      "name": "odir info reply body, two results",
+      "hex": "000500000002000600010003416461000200084c6f76656c616365000700064c6f6e646f6e0008000000060002554b00090009416461204279726f6e000600010005477261636500020006486f70706572000700024e59000800084e657720596f726b0006000255530009000b6772616365686f70706572",
+      "note": "SNAC_0x0F_0x03_InfoReply: u16 status 0x0005, u16 unknown 0, u16 result count, then per result a u16 TLV count and TLVs first, last, state, city, country, screen name (foodgroup/odir.go searchResponse). The nested count_prefix of Results writes one count.",
+      "inputs": {
+        "result 1": "Ada / Lovelace / state London / city empty / country UK / Ada Byron",
+        "result 2": "Grace / Hopper / state NY / city New York / country US / gracehopper"
+      }
+    },
+    {
+      "name": "odir keyword list reply body",
+      "hex": "00010004010100054d75736963020100044a617a7a02010004526f636b0200000648696b696e67",
+      "note": "SNAC_0x0F_0x04_KeywordListReply: u16 status 0x0001, u16 item count, then per item u8 type, u8 id, u16-prefixed name.",
+      "inputs": {
+        "items": "category 1 Music; keyword Jazz (1); keyword Rock (1); keyword Hiking (0, top level)"
+      }
+    },
+    {
+      "name": "locate get dir reply body, ten fields",
+      "hex": "0001000a00010003416461000200084c6f76656c616365000300000004000000060002554b000700064c6f6e646f6e0008000a4d6172796c65626f6e65000c0000000d000000210000",
+      "note": "SNAC_0x02_0x0C_LocateGetDirReply: u16 status 0x0001, u16 TLV count, TLVs in foodgroup/locate.go DirInfo's order 0x01, 0x02, 0x03, 0x04, 0x06, 0x07, 0x08, 0x0C, 0x0D, 0x21.",
+      "inputs": {
+        "fields": "first Ada, last Lovelace, country UK, state London, city Marylebone, the other five empty"
+      }
+    }
+  ]
+}

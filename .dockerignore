@@ -1,0 +1,12 @@
+*
+!package.json
+!pnpm-lock.yaml
+!.pnpmfile.cjs
+!tsconfig.json
+!tsconfig.build.json
+!LICENSE
+!NOTICE
+!src
+!lib
+!suite
+!test

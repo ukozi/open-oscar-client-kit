@@ -1,0 +1,11 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["lib/index.ts", "src/wire/index.ts", "src/client/index.ts", "src/model/index.ts", "test/fake/index.ts"],
+  "tsconfig": "tsconfig.build.json",
+  "out": "docs/api",
+  "plugin": ["typedoc-plugin-markdown"],
+  "readme": "none",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "githubPages": false
+}
