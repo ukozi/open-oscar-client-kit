@@ -17,9 +17,9 @@ open-oscar-client-kit is for people who write bots or clients for OSCAR servers 
 
 ## Requirements
 
-You need Node.js 22.12 or a later version. To sign on to a real server, you need an account on an OSCAR server, such as Open OSCAR Server. To try the package, the test server is enough.
+You need Node.js 22.12 or a later version. To sign on to a real server, you need an account on an OSCAR server. To try the package, the test server is enough.
 
-open-oscar-client-kit works with Open OSCAR Server. This project is independent of Open OSCAR Server.
+open-oscar-client-kit is an independent project. It is not a part of a server project.
 
 ## A first bot
 
@@ -70,4 +70,4 @@ A port is an OSCAR client library in another language. For each scenario, the su
 
 ## License
 
-open-oscar-client-kit is under the MIT license, which [LICENSE](LICENSE) gives in full. The code in `test/fake`, which includes the test server, and the byte vectors in `test/vectors` derive from Open OSCAR Server. They are used under the MIT license of Open OSCAR Server, which [NOTICE](NOTICE) gives.
+open-oscar-client-kit is under the MIT license, which [LICENSE](LICENSE) gives in full. The code in `test/fake`, which includes the test server, and the byte vectors in `test/vectors` derive from a different project. They are used under the MIT license of that project. [NOTICE](NOTICE) names the project and gives its license.
