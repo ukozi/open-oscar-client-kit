@@ -1,7 +1,9 @@
 import {
   BUCP_LOGIN_REQUEST,
   FAMILY_BUCP,
+  FAMILY_ICBM,
   FAMILY_OSERVICE,
+  ICBM_MSG_TO_HOST,
   OSERVICE_RATE_PARAM_CHANGE,
   RATE_CODE_CLEAR,
   RATE_CODE_LIMITED,
@@ -32,6 +34,7 @@ const IM_RATE_CLASS = 3;
 const BURST_COUNT = 20;
 // The test server's IM class lets three IMs go at once, then one about every 5 s: about 85 s for twenty.
 const BURST_REPLY_MS = 120_000;
+const BURST_SETTLE_MS = 5000;
 const RECONNECT_ONLINE_MS = 15_000;
 const BACKOFF_MIN_MS = 1000;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -175,6 +178,10 @@ export const SCENARIOS: readonly Scenario[] = [
         });
         expectOk('sendIm', reply);
       }
+      // A driver can reply before the server reads the IM. Wait until the server has them all, or has closed the connection.
+      const read = (): number => ctx.fake.snacsFrom('Bot').filter((snac) => snac.family === FAMILY_ICBM && snac.subtype === ICBM_MSG_TO_HOST).length;
+      const settleBy = Date.now() + BURST_SETTLE_MS;
+      while (read() < BURST_COUNT && ctx.fake.openConnections('Bot').includes('bos') && Date.now() < settleBy) await sleep(20);
       if (!ctx.fake.openConnections('Bot').includes('bos')) fail(text.DISCONNECTED);
       if (ctx.fake.bucpLogins.length !== 1) fail(text.EXTRA_LOGINS(ctx.fake.bucpLogins.length));
     },
