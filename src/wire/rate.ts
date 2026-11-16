@@ -71,7 +71,7 @@ export function decodeRateParamChange(body: Uint8Array): { code: number; params:
   return { code, params: readRateClass(r, r.remaining >= RATE_CLASS_RECORD_LENGTH_V2) };
 }
 
-/** The default of `marginMs`: a send can reach the server this much nearer to the send before it and cause no alert. */
+/** The default of `marginMs`. A send can reach the server this much nearer to the send before it and cause no alert. */
 export const PACE_MARGIN_MS = 250;
 
 /**
@@ -94,7 +94,7 @@ export class RateGovernor {
   /**
    * The pacing keeps the level a margin above the line of the server. The margin is `ceil(marginMs / windowSize) + windowSize` of level.
    * The first part is for the arrival times, and the second part is for the rounding. The second part stays when `marginMs` is 0.
-   * The margin can move the first wait of a burst to an earlier send. In its first waits, a burst falls behind by approximately the margin times `windowSize`, in milliseconds.
+   * The margin can move the first wait of a burst to an earlier send. In its first waits, a burst takes longer by approximately the margin times `windowSize`, in milliseconds.
    * After that, each paced wait is longer by the margin, in milliseconds.
    * A `marginMs` that is not a number gives the default.
    */
@@ -173,12 +173,12 @@ export class RateGovernor {
     const known = this.params !== null;
     const level = params.currentLevel;
     const margin = this.margin(params);
-    // A level far below the level of this model comes from sends that this model did not count. The time of the last of them is not known.
+    // A level far below the level of this model comes from sends that this model did not count. The model does not know the time of the last of them.
     const uncounted = trouble && known && level < this.level - margin;
     // After a limit notice, the server drops each send with no notice. The level of a limit notice can be without the sends that were on their way.
     // The same is true for an alert notice while the model is limited. The server sends it after a limit that it reported before a send.
     const dropping = known && (code === RATE_CODE_LIMITED || (code === RATE_CODE_ALERT && this.limited));
-    // A notice with the level of the notice before it: the server counted no send between the two, and the model is correct already.
+    // A notice can have the level of the notice before it. Then the server counted no send between the two, and the model is correct already.
     const repeat = dropping && this.limited && level === this.noticeLevel;
     // For each other level, the model does not know which sends made it. Thus it counts the time from the notice.
     if (!known || uncounted || (dropping && !repeat)) this.lastAt = this.now();
@@ -194,8 +194,8 @@ export class RateGovernor {
 
   // The server drops each send after the limit with no notice, and a send that it drops moves its level also.
   // Thus the model counts each send that the client wrote less than `NOTICE_FLIGHT_MS` before the notice. It counts the first of them at the time of the notice level.
-  // The level of the model is then not above the level of the server, on two conditions. A send and its notice take less than `NOTICE_FLIGHT_MS` together.
-  // No other session of the account sends after the server made the notice. The model cannot count a send of another session.
+  // The level of the model is then not above the level of the server, if a send and its notice take less than `NOTICE_FLIGHT_MS` together.
+  // A send of another session after the server made the notice also puts the server lower. The model cannot count a send of another session.
   // A send that the notice did count makes the wait longer than necessary.
   private countInFlight(p: RateClassParams): void {
     let last: number | null = null;

@@ -755,7 +755,7 @@ type Held = { link: BosLink; list: Feedbag; loaded: Promise<Feedbag>; users: num
 /**
  * A copy of the server's list for a client that holds no list.
  * The first user reads the list one time. The copy then applies the writes of other sessions.
- * The copy is let go when its last user ends.
+ * The client lets the copy go when its last user ends.
  */
 export class FeedbagCopy {
   private held: Held | null = null;

@@ -155,7 +155,7 @@ describe('the own icon with sessionBuddies', () => {
     expectNoListState();
   });
 
-  it('a second set with the same bytes costs one query and one update, with no upload', async () => {
+  it('a second set with the same bytes sends one query and one update, with no upload', async () => {
     await signOn();
     await h.client.setOwnIcon(JPEG);
     await quiet();
@@ -307,7 +307,7 @@ describe('the own icon with sessionBuddies', () => {
     expectNoListState(2);
   });
 
-  it('a set whose notice never comes leaves alone an icon that another session wrote in the meantime', async () => {
+  it('a set whose notice never comes does not change an icon that another session wrote during the set', async () => {
     await signOn();
     await h.client.setOwnIcon(JPEG);
     await quiet();

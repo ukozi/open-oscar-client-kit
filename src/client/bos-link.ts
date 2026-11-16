@@ -53,7 +53,7 @@ const connectionLost = (): OscarError => new OscarError({ kind: 'connection-lost
 const rateHeld = (): OscarError => new OscarError({ kind: 'local', code: 'rate-held' });
 
 /**
- * Every SNAC waits its turn in its rate class, so the server's limiter, which drops without a reply, is never reached.
+ * Every SNAC waits its turn in its rate class, so no SNAC reaches the server's limiter, which drops without a reply.
  * After an alert or a limit notice the class sends nothing. The clear notice ends that. The level of the model also ends that, when a send leaves it at or above the line of the server plus the pacing margin.
  * The line is the alert level after an alert, and the clear level after a limit.
  */

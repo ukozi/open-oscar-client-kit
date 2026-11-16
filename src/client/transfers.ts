@@ -39,7 +39,7 @@ export type TransfersDeps = {
   /** Sends one ICBM 0x04/0x06 body on the BOS link. It rejects when the session is not online. */
   send(body: Uint8Array): Promise<void>;
   isBlocked(name: string): boolean;
-  /** Asked one time for each offer that comes. Only true keeps the offer. For each other result, nothing is sent and nothing is kept. */
+  /** Asked one time for each offer that comes. Only true keeps the offer. For each other result, the client sends nothing and keeps nothing. */
   allowOffer(from: string): boolean;
   emitOffer(offer: FileOfferNotice): void;
   emitTransfer(status: TransferStatus): void;

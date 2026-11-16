@@ -258,7 +258,7 @@ describe('instant messages', () => {
     await settle(server.port);
     expect(send.done).toBe(false);
     expect(imsSent()).toEqual([]);
-    // 7500 ms on, one more send is over the alert line: the monitor reports clear (code 4).
+    // After 7500 ms, one more send is over the alert line, and the monitor reports clear (code 4).
     server.rateTick('alice');
     await waitFor(() => h.logs.lines.filter((l) => l.msg === 'rate notice').length === 2, 'the clear notice');
     // The hold is over. The pacing keeps the IM until a send is the margin over the line: 20 * 5033 - 19 * 4886 = 7826 ms after the alert.

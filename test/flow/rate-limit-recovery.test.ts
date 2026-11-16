@@ -86,7 +86,7 @@ describe('recovery after the server limits a rate class', () => {
   ])('a server that %s (monitor %s), %i IMs dropped: the second copy goes when the server is back, and the server drops no more', async (_name, rateMonitor, count) => {
     await boot(rateMonitor);
     const { firsts, droppedAt, serverLevel } = await burstIntoLimit(count);
-    // A send is good again when it leaves the server at its clear level.
+    // A send ends the limit when it leaves the server at its clear level.
     const backAfter = WINDOW * CLEAR - (WINDOW - 1) * serverLevel;
     // The host sends the second copy at once. The client keeps it until it lets a send go.
     const second = track(h.client.sendIm('Bob', text('second copy')));

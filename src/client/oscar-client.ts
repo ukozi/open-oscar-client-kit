@@ -103,8 +103,8 @@ export type FileTransferOptions = {
    * Asked one time for each file offer that comes, with the name of the sender. A blocked name is not shown to it.
    * The name has the letter case and the spaces that the sender set. Compare it after `normalizeScreenName`.
    * For true, the client keeps the offer. For false, the client drops the offer: it sends nothing, shows nothing and keeps nothing.
-   * A later cancel for a dropped offer has no effect, and the same offer sent again is asked again.
-   * The rule is asked before each answer of the client, also before the cancel for an offer that the client cannot take.
+   * A later cancel for a dropped offer has no effect, and the client asks the rule again when the same offer comes again.
+   * The client asks the rule before each answer, also before the cancel for an offer that it cannot take.
    * The rule gives its result at once. A result that is not true or false, such as a promise, drops the offer. A throw drops the offer.
    * The default allows each offer. Get File has no such rule.
    */
@@ -118,10 +118,10 @@ export type DirectImOptions = {
    * The name has the letter case and the spaces that the sender set. Compare it after `normalizeScreenName`.
    * For true, the client keeps the offer. For false, the client drops the offer: it sends nothing, shows nothing and keeps nothing.
    * An offer of the same name that waits stays, and an offer of this client to that name stays.
-   * A later cancel for a dropped offer has no effect, and the same offer sent again is asked again.
-   * The rule is asked before each answer of the client, also before the cancel for an offer that the client cannot take.
+   * A later cancel for a dropped offer has no effect, and the client asks the rule again when the same offer comes again.
+   * The client asks the rule before each answer, also before the cancel for an offer that it cannot take.
    * The rule gives its result at once. A result that is not true or false, such as a promise, drops the offer. A throw drops the offer.
-   * The default allows each offer. The rule of `fileTransfer` is not used here.
+   * The default allows each offer. The rule of `fileTransfer` does not apply here.
    */
   allowOffer?: (from: string) => boolean;
   /** The largest payload of one frame. Default `DIRECT_IM_MAX_MESSAGE_BYTES`. */
@@ -205,7 +205,7 @@ export type OscarClientOptions = {
   followRedirects?: boolean;
   /**
    * Gives the names to watch at each connect. The client sends them in 0x03/0x04 and does not hold or activate the server's list.
-   * `buddyList` is empty, and each write to the list rejects with `invalid-argument`. `setOwnIcon` and `clearOwnIcon` are the exception.
+   * `buddyList` is empty. Each write to the list rejects with `invalid-argument`. Only `setOwnIcon` and `clearOwnIcon` can write.
    * It cannot go with `awayRecord`. The default is the server's list.
    */
   sessionBuddies?: () => readonly string[];
@@ -220,10 +220,10 @@ export type OscarClientOptions = {
    * With the margin, a send can arrive this much nearer to the send before it and cause no rate alert.
    * The client keeps the level of a rate class above the alert level by `ceil(paceMarginMs / windowSize) + windowSize`.
    * The second part is for the rounding of the server, and it stays when the margin is 0.
-   * The margin can move the first wait of a burst to an earlier send. In its first waits, a burst falls behind by approximately that number times `windowSize`, in milliseconds.
+   * The margin can move the first wait of a burst to an earlier send. In its first waits, a burst takes longer by approximately that number times `windowSize`, in milliseconds.
    * After that, each paced wait is longer by that number of milliseconds.
-   * With the default, a burst in a class with a window of 20 falls behind by approximately 660 ms. Then each wait is 33 ms longer.
-   * A burst in a class with a window of 80 falls behind by approximately 6720 ms. Then each wait is 84 ms longer.
+   * With the default, a burst in a class with a window of 20 takes approximately 660 ms longer. Then each wait is 33 ms longer.
+   * A burst in a class with a window of 80 takes approximately 6720 ms longer. Then each wait is 84 ms longer.
    * The default is `PACE_MARGIN_MS`. A value that is not a number of 0 or more throws a `RangeError`.
    */
   paceMarginMs?: number;
@@ -1054,7 +1054,7 @@ export class OscarClient {
   /**
    * Sets the icon of the account: a GIF or JPEG that fits the limits of `isOwnIcon`, or the call rejects with `invalid-argument`.
    * The client writes the MD5 to the icon item of the server's list and sends the bytes only if the server asks for them.
-   * The server keeps the icon across connections, so one call is sufficient. A second call with the same bytes sends no bytes.
+   * The server keeps the icon across connections, so one call is enough. A second call with the same bytes sends no bytes.
    * A call during a different call rejects with `busy`. If the server refuses the write, the call rejects with a `ListWriteError`.
    * If the upload fails, the client writes the previous icon back to the item and the call rejects.
    * If the connection ends during the call, the call rejects and the client writes the previous icon back on the next connection.

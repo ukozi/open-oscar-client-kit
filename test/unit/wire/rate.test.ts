@@ -48,7 +48,7 @@ describe('RateGovernor against class 3', () => {
     expect(g.waitMs()).toBe(0);
   });
 
-  it('lets three sends through back to back, then asks for a wait that keeps the level 33 above the alert line', () => {
+  it('lets three sends through with no wait, then asks for a wait that keeps the level 33 above the alert line', () => {
     const { g, advance } = governor();
     for (let i = 0; i < 3; i++) {
       expect(g.waitMs()).toBe(0);
@@ -256,7 +256,7 @@ describe('RateGovernor against class 3', () => {
     expect(other.g.waitMs()).toBe(20 * 5133 - 19 * 3778 - (NOTICE_FLIGHT_MS - 1));
   });
 
-  it('a limit notice with the level of a model that its own sends limited counts the sends on their way again: the pacing keeps a client out of this', () => {
+  it('a limit notice with the level of a model that its own sends limited counts the sends on their way again: the pacing prevents this case', () => {
     const { g } = governor();
     for (let i = 0; i < 2; i++) g.sent();
     g.notice(2, { ...CLASS3, currentLevel: 4200 });
@@ -432,7 +432,7 @@ describe('RateGovernor against class 3', () => {
       let longest = 0;
       let alerts = 0;
       for (let i = 0; i < 2000; i++) {
-        // Now and then the client is idle, and then a burst follows.
+        // At random times the client is idle, and then a burst follows.
         if (random() < 0.02) t += 60_000;
         const wait = g.waitMs();
         longest = Math.max(longest, wait);

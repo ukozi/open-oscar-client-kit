@@ -158,7 +158,7 @@ function simulate(seed: number, opts: { monitor: boolean; jitterMs: number }): R
   if (opts.monitor) clock.at(start + pick(999), monitor);
 
   const write = (): void => void link.send(...IM).catch(() => {});
-  // The client sends now and then. Then another session of the account sends a burst, to the limit or to a small number of sends above it.
+  // The client sends at random times. Then another session of the account sends a burst, to the limit or to a small number of sends above it.
   let at = start;
   for (let i = pick(6); i > 0; i--) {
     at += pick(7000);
