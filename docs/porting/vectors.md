@@ -4,7 +4,7 @@ The vector files hold named byte strings for a codec's tests. The tests of this 
 
 ## The files
 
-In the repository, the files are in `test/vectors/`. The build copies them into `dist/test/vectors/` (`package.json`), so after `npm install open-oscar-client-kit` they are in `node_modules/open-oscar-client-kit/dist/test/vectors/`. A port with no Node can copy them from the repository at a release tag, such as `v0.1.0`.
+In the repository, the files are in `test/vectors/`. The build copies them into `dist/test/vectors/` (`package.json`), so after `npm install open-oscar-client-kit` they are in `node_modules/open-oscar-client-kit/dist/test/vectors/`. A port with no Node can copy them from the repository at a release tag, such as `v0.1.1`.
 
 ## The shape
 

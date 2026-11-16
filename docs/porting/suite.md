@@ -41,7 +41,7 @@ The suite starts the driver command in the folder it runs in, so a relative path
 The output gives the suite's version, one line for each scenario and the count that passed:
 
 ```
-suite 0.1.0, driver protocol 1
+suite 0.1.1, driver protocol 1
 ok   sign-on (0.1 s)
 FAIL wrong-password: signOn replied other, not wrong-password
 ...
@@ -62,7 +62,7 @@ npx open-oscar-client-kit suite --only "sign-on,receive-im" "--" python driver.p
 
 ```json
 {
-  "suite": "0.1.0",
+  "suite": "0.1.1",
   "protocol": 1,
   "results": [
     {
@@ -125,7 +125,7 @@ jobs:
         with:
           node-version: 22
       # Set up the port's language and build the driver here.
-      - run: npx --yes open-oscar-client-kit@0.1.0 suite --json suite.json -- python3 driver.py
+      - run: npx --yes open-oscar-client-kit@0.1.1 suite --json suite.json -- python3 driver.py
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -133,4 +133,4 @@ jobs:
           path: suite.json
 ```
 
-Pin the suite to one version, as `@0.1.0` does here. The job fails when a scenario fails, because the command then exits with 1. A run of this job that passes is what a port links to when it asks to be [listed](../ports.md).
+Pin the suite to one version, as `@0.1.1` does here. The job fails when a scenario fails, because the command then exits with 1. A run of this job that passes is what a port links to when it asks to be [listed](../ports.md).

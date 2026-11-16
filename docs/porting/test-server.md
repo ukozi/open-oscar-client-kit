@@ -58,7 +58,7 @@ The image is for authors who do not have Node:
 1. Install Docker.
 2. Run `docker run -it -p 5190:5190 ghcr.io/ukozi/open-oscar-client-kit-test-server:<version>`.
 
-Replace `<version>` with a release, such as `0.1.0`. The `-it` flags let you type lines as the peer.
+Replace `<version>` with a release, such as `0.1.1`. The `-it` flags let you type lines as the peer.
 
 The image runs the same command with `--host 0.0.0.0` (`Dockerfile`). Flags after the image name go to the command, such as `--user Me:secret1`. The login reply sends the client to `127.0.0.1` and the server's own port (`advertisedHost` in `test/fake/oscar-server.ts`). Run the client on the same machine, and keep the same port on both sides of `-p`.
 

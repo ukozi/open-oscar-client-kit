@@ -43,7 +43,7 @@ The core sends these TLVs, in this order (`bucpLogin` in `src/wire/auth.ts`):
 | --- | --- |
 | 0x01 | Screen name |
 | 0x25 | The hash |
-| 0x03 | Client ID, a text such as `echo-bot (open-oscar-client-kit), version 0.1.0/LINUX` (`src/client/client-id.ts`, `lib/session.ts`) |
+| 0x03 | Client ID, a text such as `echo-bot (open-oscar-client-kit), version 0.1.1/LINUX` (`src/client/client-id.ts`, `lib/session.ts`) |
 | 0x4A | Multi-connection flag, u8 0x01: this client can share the account with other sessions |
 | 0x133A | Cookie lifetime in seconds, u32. Only when the program sets `tokenTtlSeconds`. |
 

@@ -37,7 +37,7 @@ session.on('im', async (im) => {
 
 ## Identify the bot
 
-Give `signOn` an `app` name that says what the bot is. The session puts it in the client ID that the login sends, as `<app> (open-oscar-client-kit), version <package version>/<platform>`, such as `echo-bot (open-oscar-client-kit), version 0.1.0/MAC`. The platform is `MAC`, `WIN32` or `LINUX`, and any other platform name in capitals (`lib/session.ts`, `src/client/client-id.ts`). OOS keeps the client ID with the session ([foodgroup/auth.go](https://github.com/mk6i/open-oscar-server/blob/7bdd674afc482d700cc733be7c0b86a51f65883a/foodgroup/auth.go#L167-L168)).
+Give `signOn` an `app` name that says what the bot is. The session puts it in the client ID that the login sends, as `<app> (open-oscar-client-kit), version <package version>/<platform>`, such as `echo-bot (open-oscar-client-kit), version 0.1.1/MAC`. The platform is `MAC`, `WIN32` or `LINUX`, and any other platform name in capitals (`lib/session.ts`, `src/client/client-id.ts`). OOS keeps the client ID with the session ([foodgroup/auth.go](https://github.com/mk6i/open-oscar-server/blob/7bdd674afc482d700cc733be7c0b86a51f65883a/foodgroup/auth.go#L167-L168)).
 
 Say in the bot's profile that it is a bot, and who runs it. The simple API sets no profile. `OscarClient` sets one with `setProfile`, or with the `profile` option of `signOn` (`src/client/oscar-client.ts`):
 
