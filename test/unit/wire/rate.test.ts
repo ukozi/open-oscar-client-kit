@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PACE_MARGIN_MS, RateGovernor, checkRate } from '../../../src/wire/rate.js';
+import { NOTICE_FLIGHT_MS, PACE_MARGIN_MS, RateGovernor, checkRate } from '../../../src/wire/rate.js';
 import type { RateClassParams } from '../../../src/wire/rate.js';
 
 const CLASS3: RateClassParams = {
@@ -219,6 +219,175 @@ describe('RateGovernor against class 3', () => {
     advance(3_600_000);
     g.notice(3, { ...CLASS3, currentLevel: 3500 });
     expect(g.waitMs()).toBe(20 * 5133 - 19 * 3500);
+  });
+
+  it('a limit notice far below the model does not count a send that was on its way: the model counts the send on top of the notice level', () => {
+    const { g } = governor();
+    g.sent();
+    // Another session took the server to 3977. The server dropped the send of this client after that, and a dropped send moves the level: 3977 * 19 / 20 = 3778.
+    g.notice(3, { ...CLASS3, currentLevel: 3977 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3778);
+  });
+
+  it('counts each send of the last NOTICE_FLIGHT_MS on top of a limit notice, the first with no time before it, and the wait runs from the last of them', () => {
+    expect(NOTICE_FLIGHT_MS).toBe(2000);
+    const { g, advance } = governor();
+    g.sent();
+    advance(100);
+    g.sent();
+    advance(100);
+    g.sent();
+    advance(300);
+    g.notice(3, { ...CLASS3, currentLevel: 3977 });
+    // 3977 -> 3778, then (3778 * 19 + 100) / 20 = 3594, then (3594 * 19 + 100) / 20 = 3419. The last send was 300 ms before the notice.
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3419 - 300);
+  });
+
+  it('a limit notice counts no send that is older than NOTICE_FLIGHT_MS', () => {
+    const { g, advance } = governor();
+    g.sent();
+    advance(NOTICE_FLIGHT_MS);
+    g.notice(3, { ...CLASS3, currentLevel: 3977 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3977);
+    const other = governor();
+    other.g.sent();
+    other.advance(NOTICE_FLIGHT_MS - 1);
+    other.g.notice(3, { ...CLASS3, currentLevel: 3977 });
+    expect(other.g.waitMs()).toBe(20 * 5133 - 19 * 3778 - (NOTICE_FLIGHT_MS - 1));
+  });
+
+  it('a limit notice with the level of a model that its own sends limited counts the sends on their way again: the pacing keeps a client out of this', () => {
+    const { g } = governor();
+    for (let i = 0; i < 2; i++) g.sent();
+    g.notice(2, { ...CLASS3, currentLevel: 4200 });
+    for (let i = 0; i < 2; i++) g.sent();
+    // 4200 -> 3990 -> 3790 in the model. The model cannot know that 3790 has the four sends, and it counts them on top: 3790 -> 3600 -> 3420 -> 3249 -> 3086.
+    expect(g.status()).toBe('limited');
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3790);
+    g.notice(3, { ...CLASS3, currentLevel: 3790 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3086);
+  });
+
+  it('a limit notice near the level of a model that was not limited counts the time from the notice, and the sends on their way', () => {
+    const { g, advance } = governor();
+    g.notice(2, { ...CLASS3, currentLevel: 4010 });
+    advance(3600);
+    // Another session sent 3600 ms after the alert: (4010 * 19 + 3600) / 20 = 3989. The time before that send does not count again.
+    g.notice(3, { ...CLASS3, currentLevel: 3989 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3989);
+  });
+
+  it('while limited, an alert or a limit notice with a level above the model has the sends on their way counted on top again', () => {
+    const { g, advance } = governor();
+    g.sent();
+    advance(577);
+    g.sent();
+    advance(122);
+    // 4190 -> 3980, then (3980 * 19 + 577) / 20 = 3809.
+    g.notice(3, { ...CLASS3, currentLevel: 4190 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3809 - 122);
+    advance(845);
+    // The server made this notice at the first send, and it dropped the second after that. 4027 -> 3825, then (3825 * 19 + 577) / 20 = 3662.
+    g.notice(2, { ...CLASS3, currentLevel: 4027 });
+    expect(g.status()).toBe('limited');
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3662 - 967);
+    advance(155);
+    g.notice(3, { ...CLASS3, currentLevel: 4027 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3662 - 1122);
+  });
+
+  it('while limited, a notice that has the level of the notice before it changes nothing', () => {
+    const { g, advance } = governor();
+    g.sent();
+    advance(500);
+    // 4171 -> 3962 in the model, and the send was 500 ms before the notice.
+    g.notice(3, { ...CLASS3, currentLevel: 4171 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3962 - 500);
+    advance(1000);
+    g.notice(2, { ...CLASS3, currentLevel: 4171 });
+    expect(g.status()).toBe('limited');
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3962 - 1500);
+    advance(1000);
+    g.notice(3, { ...CLASS3, currentLevel: 4171 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3962 - 2500);
+  });
+
+  it('while limited, a notice with a level a small quantity above the model counts the time from the notice', () => {
+    const { g, advance } = governor();
+    g.sent();
+    advance(500);
+    g.notice(3, { ...CLASS3, currentLevel: 4156 });
+    advance(1000);
+    g.notice(2, { ...CLASS3, currentLevel: 4156 });
+    // 4156 -> 3948 in the model, and the send was 1500 ms before.
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3948 - 1500);
+    advance(2800);
+    // Another session sent after the alert notice, and the server is limited at 3962. The level is near 3948, but the time of 3948 is not the time of 3962.
+    g.notice(3, { ...CLASS3, currentLevel: 3962 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3962);
+  });
+
+  it('after a send or a dropped send, a notice with the level of the notice before it is a new level', () => {
+    const { g, advance } = governor();
+    g.notice(3, { ...CLASS3, currentLevel: 3900 });
+    g.dropped();
+    advance(5000);
+    g.notice(3, { ...CLASS3, currentLevel: 3900 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3900);
+    const other = governor();
+    other.g.notice(3, { ...CLASS3, currentLevel: 5200 });
+    other.g.sent();
+    expect(other.g.status()).toBe('limited');
+    other.advance(100);
+    // The model was limited at 4940 after its send. 5200 -> 4940 again, and the send was 100 ms before the notice.
+    other.g.notice(3, { ...CLASS3, currentLevel: 5200 });
+    expect(other.g.waitMs()).toBe(20 * 5133 - 19 * 4940 - 100);
+  });
+
+  it('while limited, a notice with a level a small quantity below the model counts the time from the notice', () => {
+    const { g, advance } = governor();
+    g.notice(3, { ...CLASS3, currentLevel: 3900 });
+    advance(1000);
+    // The sends that made 3890 came after the level of the model. The time before them does not count again.
+    g.notice(2, { ...CLASS3, currentLevel: 3890 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3890);
+    advance(1000);
+    g.notice(3, { ...CLASS3, currentLevel: 3889 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3889);
+  });
+
+  it('a limit that the server reports before a send, then an alert, then the limit from another session: the wait runs from the last notice', () => {
+    const { g, advance } = governor();
+    advance(1000);
+    g.sent();
+    advance(500);
+    // The server is not limited: its level is 4171 and one more send goes below the limit. 4171 -> 3962 in the model.
+    g.notice(3, { ...CLASS3, currentLevel: 4171 });
+    advance(1000);
+    g.notice(2, { ...CLASS3, currentLevel: 4171 });
+    advance(2500);
+    // Another session sent 100 ms before this notice, and the server is limited at 3947. It is back 20 * 5100 - 19 * 3947 = 27007 ms after that send.
+    g.notice(3, { ...CLASS3, currentLevel: 3947 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3947);
+    expect(g.waitMs()).toBeGreaterThanOrEqual(27007 - 100);
+  });
+
+  it('while limited, a notice with a level a small quantity below the model has the sends on their way counted on top', () => {
+    const { g, advance } = governor();
+    g.sent();
+    advance(500);
+    g.notice(3, { ...CLASS3, currentLevel: 4171 });
+    advance(400);
+    // 3950 is 12 below the 3962 of the model. 3950 * 19 / 20 = 3752, and the send was 900 ms before this notice.
+    g.notice(3, { ...CLASS3, currentLevel: 3950 });
+    expect(g.waitMs()).toBe(20 * 5133 - 19 * 3752 - 900);
+  });
+
+  it('an alert notice far below the model counts no send on top: the server reports the next change of status', () => {
+    const { g } = governor();
+    g.sent();
+    g.notice(2, { ...CLASS3, currentLevel: 4886 });
+    expect(g.waitMs()).toBe(20 * 5033 - 19 * 4886);
   });
 
   // The server of the tests: it counts each send at its arrival, and reports a change of status with the level.

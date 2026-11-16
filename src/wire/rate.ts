@@ -74,14 +74,22 @@ export function decodeRateParamChange(body: Uint8Array): { code: number; params:
 /** The default of `marginMs`: a send can reach the server this much nearer to the send before it and cause no alert. */
 export const PACE_MARGIN_MS = 250;
 
+/**
+ * A limit notice does not count a send that the client wrote less than this time before the notice arrived, in milliseconds.
+ * The time is for the send to go to the server and for the notice to come back. A connection that is slower than this can lose a send after a limit.
+ */
+export const NOTICE_FLIGHT_MS = 2000;
+
 export class RateGovernor {
   private readonly now: () => number;
   private readonly marginMs: number;
+  private recent: number[] = [];
   private params: RateClassParams | null = null;
   private level = 0;
   private lastAt = 0;
   private limited = false;
   private troubleAt = Number.NEGATIVE_INFINITY;
+  private noticeLevel: number | null = null;
 
   /**
    * The pacing keeps the level a margin above the line of the server. The margin is `ceil(marginMs / windowSize) + windowSize` of level.
@@ -101,6 +109,7 @@ export class RateGovernor {
     this.level = params.currentLevel;
     this.lastAt = this.now();
     this.limited = params.currentLevel < params.limitLevel;
+    this.noticeLevel = null;
   }
 
   status(): RateStatus {
@@ -137,9 +146,15 @@ export class RateGovernor {
     const check = checkRate(p, this.level, now - this.lastAt, this.limited);
     this.level = check.level;
     this.lastAt = now;
+    this.recent = [...this.inFlight(now), now];
+    this.noticeLevel = null;
     this.limited = check.status === 'limited' || check.status === 'disconnect';
     if (check.status !== 'clear') this.troubleAt = now;
     return this.status();
+  }
+
+  private inFlight(now: number): number[] {
+    return this.recent.filter((at) => at > now - NOTICE_FLIGHT_MS);
   }
 
   // The server's limiter dropped a send with no receipt on a live socket. So the
@@ -149,20 +164,46 @@ export class RateGovernor {
     if (!p) return;
     this.limited = true;
     this.level = Math.min(this.level, p.limitLevel - 1);
+    this.noticeLevel = null;
     this.troubleAt = this.now();
   }
 
   notice(code: number, params: RateClassParams): RateStatus {
     const trouble = code === RATE_CODE_LIMITED || code === RATE_CODE_ALERT;
+    const known = this.params !== null;
+    const level = params.currentLevel;
+    const margin = this.margin(params);
     // A level far below the level of this model comes from sends that this model did not count. The time of the last of them is not known.
-    const uncounted = trouble && this.params !== null && params.currentLevel < this.level - this.margin(params);
-    if (!this.params || uncounted) this.lastAt = this.now();
+    const uncounted = trouble && known && level < this.level - margin;
+    // After a limit notice, the server drops each send with no notice. The level of a limit notice can be without the sends that were on their way.
+    // The same is true for an alert notice while the model is limited. The server sends it after a limit that it reported before a send.
+    const dropping = known && (code === RATE_CODE_LIMITED || (code === RATE_CODE_ALERT && this.limited));
+    // A notice with the level of the notice before it: the server counted no send between the two, and the model is correct already.
+    const repeat = dropping && this.limited && level === this.noticeLevel;
+    // For each other level, the model does not know which sends made it. Thus it counts the time from the notice.
+    if (!known || uncounted || (dropping && !repeat)) this.lastAt = this.now();
     this.params = params;
-    this.level = params.currentLevel;
+    if (!repeat) this.level = level;
+    if (dropping && !repeat) this.countInFlight(params);
+    this.noticeLevel = level;
     if (code === RATE_CODE_LIMITED) this.limited = true;
     if (code === RATE_CODE_CLEAR) this.limited = false;
     if (trouble) this.troubleAt = this.now();
     return this.status();
+  }
+
+  // The server drops each send after the limit with no notice, and a send that it drops moves its level also.
+  // Thus the model counts each send that the client wrote less than `NOTICE_FLIGHT_MS` before the notice. It counts the first of them at the time of the notice level.
+  // The level of the model is then not above the level of the server, on two conditions. A send and its notice take less than `NOTICE_FLIGHT_MS` together.
+  // No other session of the account sends after the server made the notice. The model cannot count a send of another session.
+  // A send that the notice did count makes the wait longer than necessary.
+  private countInFlight(p: RateClassParams): void {
+    let last: number | null = null;
+    for (const at of this.inFlight(this.now())) {
+      this.level = checkRate(p, this.level, last === null ? 0 : at - last, true).level;
+      last = at;
+    }
+    if (last !== null) this.lastAt = last;
   }
 
   troubledWithin(ms: number): boolean {
