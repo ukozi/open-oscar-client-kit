@@ -29,19 +29,19 @@ const notice = (code: number, level: number): Uint8Array => {
 };
 
 describe('BosLink pacing', () => {
-  it('keeps class 3 at or above its alert level: five sends go out at 0, 0, 0, 2264 and 7264 ms', async () => {
+  it('keeps class 3 a margin above its alert level: five sends go out at 0, 0, 0, 2924 and 7957 ms', async () => {
     const { timers, link, imTimes } = make();
     for (let i = 0; i < 5; i++) void link.send(...IM, Uint8Array.of(i));
     await timers.advance(0);
     expect(imTimes()).toEqual([0, 0, 0]);
-    await timers.advance(2263);
+    await timers.advance(2923);
     expect(imTimes()).toHaveLength(3);
     await timers.advance(1);
-    expect(imTimes()).toEqual([0, 0, 0, 2264]);
-    await timers.advance(4999);
+    expect(imTimes()).toEqual([0, 0, 0, 2924]);
+    await timers.advance(5032);
     expect(imTimes()).toHaveLength(4);
     await timers.advance(1);
-    expect(imTimes()).toEqual([0, 0, 0, 2264, 7264]);
+    expect(imTimes()).toEqual([0, 0, 0, 2924, 7957]);
   });
 
   it('releases in the order asked', async () => {
@@ -70,63 +70,128 @@ describe('BosLink pacing', () => {
     expect(seeded.conn.sent).toHaveLength(10);
   });
 
-  it('holds a class after an alert notice until the clear notice, however long that takes', async () => {
+  it('a clear notice stops the hold of an alert before the level of the model is back', async () => {
     const { timers, conn, link, imTimes } = make();
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
     void link.send(...IM);
-    await timers.advance(60_000);
+    await timers.advance(5000);
     expect(imTimes()).toEqual([]);
+    expect(link.isHeld(...IM)).toBe(true);
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(4, 5100), requestId: 0x80000000 });
     await timers.advance(0);
-    expect(imTimes()).toEqual([60_000]);
+    expect(imTimes()).toEqual([5000]);
+    expect(timers.pending()).toEqual([]);
   });
 
-  it('stops the hold of an alert 60 s after the level is back, when no clear notice comes', async () => {
+  it('stops the hold of an alert when the level of the model is back at the alert level and the margin, with no clear notice', async () => {
     const { timers, conn, link, imTimes } = make();
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
     void link.send(...IM);
-    // Level 4886 is back at the alert level of 5000 after 7166 ms.
-    await timers.advance(67_165);
+    // A send leaves level 4886 at 5033, the alert level and the margin, after 20 * 5033 - 19 * 4886 = 7826 ms.
+    await timers.advance(7825);
     expect(imTimes()).toEqual([]);
     expect(link.isHeld(...IM)).toBe(true);
     await timers.advance(1);
-    expect(imTimes()).toEqual([67_166]);
+    expect(imTimes()).toEqual([7826]);
     expect(link.isHeld(...IM)).toBe(false);
+    expect(timers.pending()).toEqual([]);
   });
 
-  it('stops the hold of a limit 60 s after the level is back, and reports the class as not limited', async () => {
+  it('a release timer that fires 1 ms before the clock is there sets the timer again, and the queued send goes out', async () => {
+    const timers = new ManualTimers();
+    const conn = new StubConn(timers);
+    let lag = 0;
+    const link = new BosLink(conn, { now: () => timers.now() - lag, timers: timers.api, log: captureLog().log });
+    link.seedRates(decodeRateParamsReply(bytesOf(oservice, 'rate params reply body, default classes, OService 1')));
+    const start = timers.now();
+    conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
+    void link.send(...IM);
+    expect(timers.pending()).toEqual([7826]);
+    // From here the clock is 1 ms behind the timers, so the timer fires when the model has 1 ms of wait left.
+    lag = 1;
+    await timers.advance(7826);
+    expect(conn.sent).toEqual([]);
+    expect(link.isHeld(...IM)).toBe(true);
+    expect(timers.pending()).toEqual([1]);
+    await timers.advance(1);
+    expect(conn.sent.map((s) => s.at - start)).toEqual([7827]);
+    expect(link.isHeld(...IM)).toBe(false);
+    expect(timers.pending()).toEqual([]);
+  });
+
+  it('stops the hold of a limit when the level of the model is back at the clear level, and reports the class as not limited', async () => {
     const { timers, conn, link, imTimes } = make();
     const seen: [number, boolean][] = [];
     link.onRateChange((classId, limited) => seen.push([classId, limited]));
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(3, 3977), requestId: 0x80000000 });
     void link.send(...IM);
-    // Level 3977 is back at the clear level of 5100 after 26437 ms.
-    await timers.advance(86_436);
+    // 20 * 5133 - 19 * 3977 = 27097 ms.
+    await timers.advance(27_096);
     expect(imTimes()).toEqual([]);
     expect(link.isLimited(...IM)).toBe(true);
     await timers.advance(1);
-    expect(imTimes()).toEqual([86_437]);
+    expect(imTimes()).toEqual([27_097]);
     expect(link.isLimited(...IM)).toBe(false);
     expect(seen).toEqual([[3, true], [3, false]]);
   });
 
-  it('counts the 60 s again from each notice of the held class, and not at all after the clear notice or a close', async () => {
+  it('counts the wait again from a notice with a lower level, and sets no timer after the clear notice or a close', async () => {
     const { timers, conn, link, imTimes } = make();
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
     void link.send(...IM);
-    await timers.advance(60_000);
-    conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
-    await timers.advance(59_999);
+    await timers.advance(5000);
+    // 20 * 5033 - 19 * 4700 = 11360 ms from this notice.
+    conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4700), requestId: 0x80000000 });
+    await timers.advance(11_359);
     expect(imTimes()).toEqual([]);
-    conn.deliver({ family: 1, subtype: 0x0a, body: notice(4, 5100), requestId: 0x80000000 });
-    await timers.advance(0);
-    expect(imTimes()).toEqual([119_999]);
+    await timers.advance(1);
+    expect(imTimes()).toEqual([16_360]);
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
+    void link.send(...IM);
+    expect(timers.pending()).toHaveLength(1);
+    conn.deliver({ family: 1, subtype: 0x0a, body: notice(4, 5100), requestId: 0x80000000 });
+    // The hold is over. The timer that stays is the pacing: 20 * 5033 - 19 * 5100 = 3760 ms.
+    expect(timers.pending()).toEqual([3760]);
+    await timers.advance(3760);
+    expect(imTimes()).toEqual([16_360, 20_120]);
+    expect(timers.pending()).toEqual([]);
+    conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
+    void link.send(...IM).catch(() => {});
     conn.close();
     expect(timers.pending()).toEqual([]);
   });
 
-  it('keeps a hold with no send in the queue and sets no timer for it; a send after the 60 s goes out at once', async () => {
+  it('a burst of ten after an alert notice: no send waits longer than the wait of the model, and the log has no warning', async () => {
+    const timers = new ManualTimers();
+    const conn = new StubConn(timers);
+    const captured = captureLog();
+    const link = new BosLink(conn, { now: timers.now, timers: timers.api, log: captured.log });
+    link.seedRates(decodeRateParamsReply(bytesOf(oservice, 'rate params reply body, default classes, OService 1')));
+    const start = timers.now();
+    for (let i = 0; i < 10; i++) void link.send(...IM, Uint8Array.of(i));
+    await timers.advance(2924);
+    // The server counted the fourth send early.
+    conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4999), requestId: 0x80000000 });
+    await timers.advance(120_000);
+    const times = conn.sent.map((s) => s.at - start);
+    // 20 * 5033 - 19 * 4999 = 5679 ms after the fourth send, then 5033 ms each.
+    expect(times).toEqual([0, 0, 0, 2924, 8603, 13_636, 18_669, 23_702, 28_735, 33_768]);
+    expect(captured.lines.filter((l) => l.level === 'warn' || l.level === 'error')).toEqual([]);
+    expect(captured.lines.filter((l) => l.msg.startsWith('a rate hold stopped')).map((l) => l.fields)).toEqual([{ classId: 3 }]);
+  });
+
+  it('paceMarginMs sets the margin of each class: 0 ms keeps only the margin for the rounding', async () => {
+    const timers = new ManualTimers();
+    const conn = new StubConn(timers);
+    const link = new BosLink(conn, { now: timers.now, timers: timers.api, log: captureLog().log, paceMarginMs: 0 });
+    link.seedRates(decodeRateParamsReply(bytesOf(oservice, 'rate params reply body, default classes, OService 1')));
+    const start = timers.now();
+    for (let i = 0; i < 5; i++) void link.send(...IM, Uint8Array.of(i));
+    await timers.advance(10_000);
+    expect(conn.sent.map((s) => s.at - start)).toEqual([0, 0, 0, 2664, 7684]);
+  });
+
+  it('keeps a hold with no send in the queue and sets no timer for it; a send after the level is back goes out at once', async () => {
     const { timers, conn, link, imTimes } = make();
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(2, 4886), requestId: 0x80000000 });
     expect(timers.pending()).toEqual([]);
@@ -163,12 +228,11 @@ describe('BosLink pacing', () => {
     link.onRateChange((_classId, limited) => seen.push(limited));
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(3, 3977) });
     void link.send(...IM);
-    await timers.advance(60_000);
+    await timers.advance(27_096);
     expect(conn.sent).toEqual([]);
-    conn.deliver({ family: 1, subtype: 0x0a, body: notice(4, 5100) });
-    await timers.advance(0);
+    await timers.advance(1);
     expect(conn.sent.map((s) => [s.family, s.subtype])).toEqual([[4, 6]]);
-    // The listener after the one that threw still heard both notices, and the failure is in the log.
+    // The listener after the one that threw still heard both changes, and the failure is in the log.
     expect(seen).toEqual([true, false]);
     expect(link.isLimited(...IM)).toBe(false);
     expect(captured.text()).toContain('a rate listener threw');
@@ -245,21 +309,21 @@ describe('BosLink paced turns', () => {
   it("a paced turn waits its class's turn and counts as sent", async () => {
     const { timers, conn, link, imTimes } = make();
     const start = timers.now();
-    // Three sends use what the class allows at once: a fourth SNAC waits 2264 ms, a fifth 5000 ms more.
+    // Three sends use what the class allows at once: a fourth SNAC waits 2924 ms, a fifth 5033 ms more.
     for (let i = 0; i < 3; i++) void link.send(...IM, Uint8Array.of(i));
     let turnAt: number | undefined;
     void link.paced(...IM).then(() => (turnAt = timers.now() - start));
-    await timers.advance(2263);
+    await timers.advance(2923);
     expect(turnAt).toBeUndefined();
     await timers.advance(1);
-    expect(turnAt).toBe(2264);
+    expect(turnAt).toBe(2924);
     expect(conn.sent).toHaveLength(3);
 
     void link.send(...IM, Uint8Array.of(9));
-    await timers.advance(4999);
+    await timers.advance(5032);
     expect(imTimes()).toEqual([0, 0, 0]);
     await timers.advance(1);
-    expect(imTimes()).toEqual([0, 0, 0, 7264]);
+    expect(imTimes()).toEqual([0, 0, 0, 7957]);
   });
 
   it('a low paced turn is refused while the class is held', async () => {
@@ -268,7 +332,7 @@ describe('BosLink paced turns', () => {
     await expect(link.paced(...IM, { low: true }).then(() => 'ok', kindOf)).resolves.toBe('rate-held');
     let turn = false;
     void link.paced(...IM).then(() => (turn = true));
-    await timers.advance(60_000);
+    await timers.advance(7000);
     expect(turn).toBe(false);
     conn.deliver({ family: 1, subtype: 0x0a, body: notice(4, 5100), requestId: 0x80000000 });
     await timers.advance(0);
@@ -293,7 +357,7 @@ describe('BosLink requests', () => {
     for (let i = 0; i < 3; i++) void link.send(...IM);
     let error: unknown;
     link.request(...IM, undefined, 15_000).catch((e: unknown) => (error = e));
-    await timers.advance(2264 + 14_999);
+    await timers.advance(2924 + 14_999);
     expect(error).toBeUndefined();
     await timers.advance(1);
     expect((error as OscarError).info).toEqual({ kind: 'timeout', rateLimited: false });
@@ -342,7 +406,7 @@ describe('BosLink requests', () => {
     for (let i = 0; i < 3; i++) void link.send(...IM);
     const errors: unknown[] = [];
     link.requestMatching(...IM, undefined, 15_000, () => false).catch((e: unknown) => errors.push(e));
-    await timers.advance(2264);
+    await timers.advance(2924);
     conn.deliver({ family: 4, subtype: 0x14, requestId: conn.sent[3]?.requestId ?? -1 });
     await timers.advance(14_999);
     expect(errors).toEqual([]);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { guardTimers } from '../../../src/client/guard.js';
+import { guardTimers, offerAllowed } from '../../../src/client/guard.js';
+import { captureLog } from '../../fake/oscar-client.js';
 import { ManualTimers } from '../../fake/oscar-client.js';
 
 describe('guardTimers', () => {
@@ -46,5 +47,35 @@ describe('guardTimers', () => {
       throw new Error('escapes');
     }, 10);
     await expect(manual.advance(10)).rejects.toThrow('escapes');
+  });
+});
+
+describe('offerAllowed', () => {
+  it('a rule that gives a promise that rejects drops the offer, and the rejection has a handler', async () => {
+    const unhandled: unknown[] = [];
+    const hear = (reason: unknown): void => void unhandled.push(reason);
+    process.on('unhandledRejection', hear);
+    try {
+      const captured = captureLog();
+      const rule = (() => Promise.reject(new Error('no'))) as unknown as (from: string) => boolean;
+      expect(offerAllowed(rule, 'Cathy', captured.log, 'file')).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      expect(captured.lines.map((l) => l.msg)).toEqual(['the rule for file offers gave a value that is not true or false, and the offer is dropped']);
+      expect(captured.text()).not.toContain('Cathy');
+    } finally {
+      process.off('unhandledRejection', hear);
+    }
+  });
+
+  it('a thenable whose then throws drops the offer with no throw', () => {
+    const captured = captureLog();
+    const rule = (() => ({
+      // biome-ignore lint/suspicious/noThenProperty: the test gives a thenable to the rule.
+      then() {
+        throw new Error('no');
+      },
+    })) as unknown as (from: string) => boolean;
+    expect(offerAllowed(rule, 'Cathy', captured.log, 'direct im')).toBe(false);
   });
 });

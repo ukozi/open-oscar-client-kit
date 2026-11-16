@@ -33,6 +33,8 @@ export type BosLinkDeps = {
   classQueueMax?: number | undefined;
   /** Sends no liveness probe while the probe's rate class is held. The default sends the probe on schedule. */
   skipProbeWhileRateHeld?: boolean | undefined;
+  /** How early a send can reach the server and cause no alert, in milliseconds. `RateGovernor` gives the cost. The default is `PACE_MARGIN_MS`. */
+  paceMarginMs?: number | undefined;
 };
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -44,17 +46,17 @@ type RateClass = {
   held: boolean;
   limited: boolean;
   timer: Timer | null;
-  holdEnds: number;
   release: Timer | null;
 };
-
-// With no clear notice, a hold stops this long after the level is back.
-const HOLD_GRACE_MS = 60_000;
 
 const connectionLost = (): OscarError => new OscarError({ kind: 'connection-lost' });
 const rateHeld = (): OscarError => new OscarError({ kind: 'local', code: 'rate-held' });
 
-/** Every SNAC waits its turn in its rate class, so the server's limiter, which drops without a reply, is never reached. */
+/**
+ * Every SNAC waits its turn in its rate class, so the server's limiter, which drops without a reply, is never reached.
+ * After an alert or a limit notice the class sends nothing. The clear notice ends that. The level of the model also ends that, when a send leaves it at or above the line of the server plus the pacing margin.
+ * The line is the alert level after an alert, and the clear level after a limit.
+ */
 export class BosLink {
   private readonly classes = new Map<number, RateClass>();
   private readonly rateListeners: ((classId: number, limited: boolean) => void)[] = [];
@@ -241,7 +243,7 @@ export class BosLink {
   private rateClass(id: number): RateClass {
     let rc = this.classes.get(id);
     if (!rc) {
-      rc = { governor: new RateGovernor({ now: this.deps.now }), queue: [], low: [], held: false, limited: false, timer: null, holdEnds: 0, release: null };
+      rc = { governor: new RateGovernor({ now: this.deps.now, marginMs: this.deps.paceMarginMs }), queue: [], low: [], held: false, limited: false, timer: null, release: null };
       this.classes.set(id, rc);
     }
     return rc;
@@ -258,7 +260,7 @@ export class BosLink {
       job.write();
       return;
     }
-    this.endStaleHold(rc, classId);
+    this.endHold(rc, classId);
     if ((low && rc.held) || rc.queue.length + rc.low.length >= (this.deps.classQueueMax ?? Number.POSITIVE_INFINITY)) {
       job.reject(rateHeld());
       return;
@@ -303,7 +305,6 @@ export class BosLink {
     }
     if (code === RATE_CODE_CLEAR) rc.held = false;
     this.deps.log.debug('rate notice', { classId: params.id, code, level: params.currentLevel });
-    if (rc.held) rc.holdEnds = this.deps.now() + rc.governor.waitMs() + HOLD_GRACE_MS;
     this.watchHold(rc, params.id);
     this.setLimited(rc, params.id, code === RATE_CODE_LIMITED);
   }
@@ -315,15 +316,17 @@ export class BosLink {
     if (!rc.held || rc.queue.length === 0) return;
     rc.release = this.deps.timers.setTimeout(() => {
       rc.release = null;
-      this.endStaleHold(rc, classId);
-    }, Math.max(0, rc.holdEnds - this.deps.now()));
+      this.endHold(rc, classId);
+      this.watchHold(rc, classId);
+    }, rc.governor.waitMs());
   }
 
-  // A hold with no clear notice stops when a send waits past the bound, so no send waits for ever.
-  private endStaleHold(rc: RateClass, classId: number): void {
-    if (!rc.held || this.deps.now() < rc.holdEnds) return;
+  // A held class sends nothing, and the server can stay silent about a class that sends nothing.
+  // Thus the hold stops when the model has no wait for a send.
+  private endHold(rc: RateClass, classId: number): void {
+    if (!rc.held || rc.governor.waitMs() > 0) return;
     rc.held = false;
-    this.deps.log.warn('a rate hold stopped with no clear notice', { classId });
+    this.deps.log.debug('a rate hold stopped: the level is back', { classId });
     this.watchHold(rc, classId);
     this.setLimited(rc, classId, false);
   }

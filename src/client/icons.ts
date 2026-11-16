@@ -110,6 +110,9 @@ type OwnSet = { hex: string; bytes: Uint8Array; noticed(result: Noticed): void; 
 type ItemInfo = { flags: number; hash: Uint8Array };
 type Undo = { key: string; failed: string; previous: ItemInfo };
 
+/** The list that holds the icon item, or a function that reads a copy of that list from the server. */
+export type IconList = Feedbag | (() => Promise<Feedbag>);
+
 const quiet = (): void => {};
 const isUploadReply = (snac: Snac): boolean => snac.family === FAMILY_BART && (snac.subtype === BART_UPLOAD_REPLY || snac.subtype === BART_ERR);
 const isDownloadReply = (snac: Snac): boolean => snac.family === FAMILY_BART && (snac.subtype === BART_DOWNLOAD_REPLY || snac.subtype === BART_ERR);
@@ -207,7 +210,7 @@ export class Icons {
     this.route = null;
   }
 
-  async setOwn(link: BosLink, feedbag: Feedbag, self: string, bytes: Uint8Array): Promise<void> {
+  async setOwn(link: BosLink, list: IconList, self: string, bytes: Uint8Array): Promise<void> {
     if (!isOwnIcon(bytes)) throw new OscarError({ kind: 'local', code: 'invalid-argument' });
     if (this.changing) throw new OscarError({ kind: 'local', code: 'busy' });
     this.changing = true;
@@ -218,6 +221,7 @@ export class Icons {
       const hex = toHex(hash);
       this.discarded.delete(hex);
       const key = normalizeScreenName(self);
+      const feedbag = typeof list === 'function' ? await list() : list;
       const before = this.undo?.key === key ? this.undo.previous : (feedbag.iconInfo() ?? { flags: 0x00, hash: BART_CLEAR_HASH });
       const heldBefore = (await this.cached(hex)) !== null;
       await this.deps.store.put(hex, copy);
@@ -243,10 +247,11 @@ export class Icons {
     }
   }
 
-  async clearOwn(link: BosLink, feedbag: Feedbag, self: string): Promise<void> {
+  async clearOwn(link: BosLink, list: IconList, self: string): Promise<void> {
     if (this.changing) throw new OscarError({ kind: 'local', code: 'busy' });
     this.changing = true;
     try {
+      const feedbag = typeof list === 'function' ? await list() : list;
       if (!(await feedbag.setIcon(link, { flags: 0x00, hash: BART_CLEAR_HASH }))) return;
       const key = normalizeScreenName(self);
       if (this.undo?.key === key) this.undo = null;
@@ -259,10 +264,18 @@ export class Icons {
     }
   }
 
-  async resume(link: BosLink, feedbag: Feedbag, self: string): Promise<void> {
+  async resume(link: BosLink, list: IconList, self: string): Promise<void> {
     const undo = this.undo;
     if (!undo || undo.key !== normalizeScreenName(self) || this.changing) return;
-    await this.writeBack(link, feedbag, undo);
+    if (typeof list !== 'function') return this.writeBack(link, list, undo);
+    let feedbag: Feedbag;
+    try {
+      feedbag = await list();
+    } catch (error) {
+      this.deps.log.warn('the previous icon could not be written back', failureFields(error));
+      return;
+    }
+    if (this.undo === undo && !this.changing) await this.writeBack(link, feedbag, undo);
   }
 
   // The item can name a hash whose bytes the server never got. The server still holds the previous icon's, so naming that asks for no upload.

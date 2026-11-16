@@ -12,6 +12,7 @@ import type {
   FileOfferNotice, FileSink, OutgoingFile, TransferFailure, TransferProgress, TransferState, TransferStatus,
 } from '../model/transfer.js';
 import { OscarError } from './errors.js';
+import { offerAllowed } from './guard.js';
 import { OftError, receiveFiles, sendFiles as sendOverLink } from './oft-session.js';
 import type { OftSignal } from './oft-session.js';
 import type { PeerLink } from './peer-link.js';
@@ -38,6 +39,8 @@ export type TransfersDeps = {
   /** Sends one ICBM 0x04/0x06 body on the BOS link. It rejects when the session is not online. */
   send(body: Uint8Array): Promise<void>;
   isBlocked(name: string): boolean;
+  /** Asked one time for each offer that comes. Only true keeps the offer. For each other result, nothing is sent and nothing is kept. */
+  allowOffer(from: string): boolean;
   emitOffer(offer: FileOfferNotice): void;
   emitTransfer(status: TransferStatus): void;
   /** The cookie of a new offer. Tests replace it. */
@@ -195,6 +198,10 @@ export class Transfers {
     const { log } = this.deps;
     if (this.deps.isBlocked(message.fromDisplay)) {
       log.debug('dropped a file offer from a blocked name');
+      return;
+    }
+    if (!offerAllowed(this.deps.allowOffer, message.fromDisplay, log, 'file')) {
+      log.debug('dropped a file offer that the host does not allow');
       return;
     }
     const file = message.file;

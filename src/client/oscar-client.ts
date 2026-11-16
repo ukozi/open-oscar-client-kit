@@ -59,11 +59,11 @@ import { BosLink } from './bos-link.js';
 import { connectionTls } from './connect-options.js';
 import { Directory } from './directory.js';
 import { OscarError, SignOnError } from './errors.js';
-import { Feedbag } from './feedbag.js';
+import { Feedbag, FeedbagCopy } from './feedbag.js';
 import { guardTimers } from './guard.js';
 import type { GuardSite } from './guard.js';
 import { Icons, memoryIconStore } from './icons.js';
-import type { IconChange, IconsFrom, IconStore } from './icons.js';
+import type { IconChange, IconList, IconsFrom, IconStore } from './icons.js';
 import { defaultLoginBudget } from './login-budget.js';
 import type { LoginBudget } from './login-budget.js';
 import { IM_FALLBACK_LIMIT_BYTES, Messaging } from './messaging.js';
@@ -99,10 +99,31 @@ export type HostingLimits = {
 export type FileTransferOptions = {
   /** Asked before each dial to the address that a file offer names. The default allows every address. */
   allowDial?: (address: PeerAddress, context: { server: ServerAddress; bos: { host: string; port: number } }) => boolean | Promise<boolean>;
+  /**
+   * Asked one time for each file offer that comes, with the name of the sender. A blocked name is not shown to it.
+   * The name has the letter case and the spaces that the sender set. Compare it after `normalizeScreenName`.
+   * For true, the client keeps the offer. For false, the client drops the offer: it sends nothing, shows nothing and keeps nothing.
+   * A later cancel for a dropped offer has no effect, and the same offer sent again is asked again.
+   * The rule is asked before each answer of the client, also before the cancel for an offer that the client cannot take.
+   * The rule gives its result at once. A result that is not true or false, such as a promise, drops the offer. A throw drops the offer.
+   * The default allows each offer. Get File has no such rule.
+   */
+  allowOffer?: (from: string) => boolean;
 };
 export type DirectImOptions = {
   /** Asked before each dial to the address that a Direct IM offer names. The default is the rule of `fileTransfer`. */
   allowDial?: FileTransferOptions['allowDial'];
+  /**
+   * Asked one time for each Direct IM offer that comes, with the name of the sender. A blocked name is not shown to it.
+   * The name has the letter case and the spaces that the sender set. Compare it after `normalizeScreenName`.
+   * For true, the client keeps the offer. For false, the client drops the offer: it sends nothing, shows nothing and keeps nothing.
+   * An offer of the same name that waits stays, and an offer of this client to that name stays.
+   * A later cancel for a dropped offer has no effect, and the same offer sent again is asked again.
+   * The rule is asked before each answer of the client, also before the cancel for an offer that the client cannot take.
+   * The rule gives its result at once. A result that is not true or false, such as a promise, drops the offer. A throw drops the offer.
+   * The default allows each offer. The rule of `fileTransfer` is not used here.
+   */
+  allowOffer?: (from: string) => boolean;
   /** The largest payload of one frame. Default `DIRECT_IM_MAX_MESSAGE_BYTES`. */
   maxMessageBytes?: number;
   /** The most attachments of one message. Default `DIRECT_IM_MAX_ATTACHMENTS`. */
@@ -183,8 +204,8 @@ export type OscarClientOptions = {
   /** Goes to each host that the server advertises for BOS and the services, also a loopback or unroutable one. `pinRedirects` comes first. The default is false. */
   followRedirects?: boolean;
   /**
-   * Gives the names to watch at each connect. The client sends them in 0x03/0x04 and does not read or write the server's list.
-   * `buddyList` is empty, and each write to the list, also of the icon of the account, rejects with `invalid-argument`.
+   * Gives the names to watch at each connect. The client sends them in 0x03/0x04 and does not hold or activate the server's list.
+   * `buddyList` is empty, and each write to the list rejects with `invalid-argument`. `setOwnIcon` and `clearOwnIcon` are the exception.
    * It cannot go with `awayRecord`. The default is the server's list.
    */
   sessionBuddies?: () => readonly string[];
@@ -194,6 +215,18 @@ export type OscarClientOptions = {
   botFlagExempt?: boolean;
   /** The most rooms joined at one time, an integer of 1 or more. The default is `MAX_ROOMS`. */
   maxRooms?: number;
+  /**
+   * The pacing margin in milliseconds, 0 or more, for BOS and for each room connection. The server measures the time between the arrivals of two sends.
+   * With the margin, a send can arrive this much nearer to the send before it and cause no rate alert.
+   * The client keeps the level of a rate class above the alert level by `ceil(paceMarginMs / windowSize) + windowSize`.
+   * The second part is for the rounding of the server, and it stays when the margin is 0.
+   * The margin can move the first wait of a burst to an earlier send. In its first waits, a burst falls behind by approximately that number times `windowSize`, in milliseconds.
+   * After that, each paced wait is longer by that number of milliseconds.
+   * With the default, a burst in a class with a window of 20 falls behind by approximately 660 ms. Then each wait is 33 ms longer.
+   * A burst in a class with a window of 80 falls behind by approximately 6720 ms. Then each wait is 84 ms longer.
+   * The default is `PACE_MARGIN_MS`. A value that is not a number of 0 or more throws a `RangeError`.
+   */
+  paceMarginMs?: number;
 };
 /** What a first sign-on puts back. Only a `restore` puts back the away it held, in its first Locate write, with the senders answered while away. */
 export type ResumeState = { origin: 'start' | 'restore'; invisible: boolean; away: AwayRecord | null; answered: readonly string[]; reportIdle: boolean };
@@ -282,6 +315,7 @@ export class OscarClient {
   private readonly timers: TimerApi;
   private readonly guard: (error: unknown, site: GuardSite) => void;
   private readonly hosting: HostingLimits;
+  private readonly paceMarginMs: number | undefined;
   private readonly skips = new SkipCounter();
   private readonly random: () => number;
   private readonly policy: ReconnectPolicy;
@@ -324,15 +358,19 @@ export class OscarClient {
   private issued: IssuedTicket | null = null;
   private onlineAt = 0;
   private imLimited = false;
+  // A copy of the server's list that lives for one write of the icon item. Null without `sessionBuddies`.
+  private readonly iconList: FeedbagCopy | null;
   // The names sent on the current connection, normalised. Null without `sessionBuddies`.
   private watched: ReadonlySet<string> | null;
 
   constructor(opts: OscarClientOptions = {}) {
     const maxRooms = roomLimit(opts.maxRooms);
+    this.paceMarginMs = paceMargin(opts.paceMarginMs);
     if (opts.sessionBuddies && opts.awayRecord) throw new RangeError('sessionBuddies cannot go with awayRecord');
     this.watched = opts.sessionBuddies ? new Set() : null;
     this.legacyCharset = new TextDecoder(opts.legacyCharset ?? 'windows-1252').encoding;
     this.log = opts.log ?? silent;
+    this.iconList = opts.sessionBuddies ? new FeedbagCopy({ log: this.log }) : null;
     this.now = opts.now ?? Date.now;
     this.guard = opts.guard ?? ((error, site) => this.defaultGuard(error, site));
     this.timers = guardTimers(opts.timers ?? { setTimeout, clearTimeout }, (error) => this.guard(error, { kind: 'timer' }));
@@ -397,6 +435,7 @@ export class OscarClient {
       context: () => this.currentRoomsContext(),
       wireDetail: opts.wireDetail === true,
       maxRooms,
+      paceMarginMs: this.paceMarginMs,
       tls: opts.tls,
       followRedirects: opts.followRedirects === true,
     });
@@ -425,6 +464,7 @@ export class OscarClient {
       rendezvous: this.rendezvous,
       send: toHost,
       isBlocked: (name) => this.excluded(name),
+      allowOffer: opts.fileTransfer?.allowOffer ?? (() => true),
       emitOffer: (offer) => this.emit('fileOffer', offer),
       emitTransfer: (status) => this.emit('transfer', status),
     });
@@ -437,6 +477,7 @@ export class OscarClient {
       self: () => this.signOnService.self?.screenName ?? '',
       send: toHost,
       isBlocked: (name) => this.excluded(name),
+      allowOffer: opts.directIm?.allowOffer ?? (() => true),
       maxMessageBytes: opts.directIm?.maxMessageBytes ?? DIRECT_IM_MAX_MESSAGE_BYTES,
       maxAttachments: opts.directIm?.maxAttachments ?? DIRECT_IM_MAX_ATTACHMENTS,
       maxTextBytes: opts.directIm?.maxTextBytes ?? DIRECT_IM_MAX_TEXT_BYTES,
@@ -1010,14 +1051,34 @@ export class OscarClient {
     return this.icons.discard(hash);
   }
 
+  /**
+   * Sets the icon of the account: a GIF or JPEG that fits the limits of `isOwnIcon`, or the call rejects with `invalid-argument`.
+   * The client writes the MD5 to the icon item of the server's list and sends the bytes only if the server asks for them.
+   * The server keeps the icon across connections, so one call is sufficient. A second call with the same bytes sends no bytes.
+   * A call during a different call rejects with `busy`. If the server refuses the write, the call rejects with a `ListWriteError`.
+   * If the upload fails, the client writes the previous icon back to the item and the call rejects.
+   * If the connection ends during the call, the call rejects and the client writes the previous icon back on the next connection.
+   *
+   * With `sessionBuddies`, each call first reads the server's list one time (0x13/0x04) to find the icon item.
+   * The client updates that item with the id it has. If there is no such item, the client adds one with an id that no other item has.
+   * The client changes no other item and keeps no copy of the list after the call: `buddyList` stays empty and no `buddyList` event occurs.
+   * If the server refuses the read, the call rejects with that refusal and the client writes nothing.
+   */
   async setOwnIcon(bytes: Uint8Array): Promise<void> {
-    const link = this.listLink();
-    return this.icons.setOwn(link, this.feedbag, this.ownScreenName(), bytes);
+    const link = this.onlineLink();
+    const self = this.ownScreenName();
+    return this.withIconList(link, (list) => this.icons.setOwn(link, list, self, bytes));
   }
 
+  /**
+   * Removes the icon of the account: the client writes the hash of no icon to the icon item and does not delete the item.
+   * If the list has no icon item, the client writes nothing and the call resolves.
+   * With `sessionBuddies`, each call first reads the server's list one time, as `setOwnIcon` does.
+   */
   async clearOwnIcon(): Promise<void> {
-    const link = this.listLink();
-    return this.icons.clearOwn(link, this.feedbag, this.ownScreenName());
+    const link = this.onlineLink();
+    const self = this.ownScreenName();
+    return this.withIconList(link, (list) => this.icons.clearOwn(link, list, self));
   }
 
   async formatScreenName(name: string): Promise<string> {
@@ -1104,6 +1165,11 @@ export class OscarClient {
   private listLink(): BosLink {
     if (this.watched) throw new OscarError({ kind: 'local', code: 'invalid-argument' });
     return this.onlineLink();
+  }
+
+  // The list for a write of the icon item. With `sessionBuddies` it is a function that reads a copy of the server's list.
+  private withIconList<T>(link: BosLink, run: (list: IconList) => Promise<T>): Promise<T> {
+    return this.iconList ? this.iconList.during(link, run) : run(this.feedbag);
   }
 
   // What `sessionBuddies` gives, normalised, each name one time. It leaves out an empty name and a name longer than 255 bytes.
@@ -1244,6 +1310,7 @@ export class OscarClient {
   private offer(link: BosLink, snac: Snac): void {
     if (this.signOnService.handle(snac)) return;
     if (this.presence.handle(snac)) return;
+    this.iconList?.handle(snac);
     if (this.feedbag.handle(snac)) return;
     if (this.transfers.handle(snac)) return;
     if (this.directIm.handle(snac)) return;
@@ -1283,6 +1350,7 @@ export class OscarClient {
         log: this.log,
         classQueueMax: this.hosting.classQueueMax,
         skipProbeWhileRateHeld: this.hosting.skipProbeWhileRateHeld,
+        paceMarginMs: this.paceMarginMs,
       });
       link.onSnac((snac) => {
         if (snac.family === FAMILY_OSERVICE && snac.subtype === OSERVICE_HOST_ONLINE) hostOnline = true;
@@ -1356,7 +1424,7 @@ export class OscarClient {
     this.awayRecords?.afterOnline(link);
     if (!this.watched) this.feedbag.ensureTypingPref(link);
     const self = this.signOnService.self;
-    if (self) this.spawn('resume-icons', () => this.icons.resume(link, this.feedbag, self.screenName));
+    if (self) this.spawn('resume-icons', () => this.withIconList(link, (list) => this.icons.resume(link, list, self.screenName)));
     this.spawn('retrieve-offline', () => this.messaging.retrieveOffline(link));
   }
 
@@ -1510,6 +1578,11 @@ export class OscarClient {
   private spawn(task: string, run: () => Promise<unknown>): void {
     void run().catch((error: unknown) => this.guard(error, { kind: 'task', task }));
   }
+}
+
+function paceMargin(ms: number | undefined): number | undefined {
+  if (ms !== undefined && !(Number.isFinite(ms) && ms >= 0)) throw new RangeError(`paceMarginMs ${ms} is not a number of 0 or more`);
+  return ms;
 }
 
 function roomLimit(max: number | undefined): number {

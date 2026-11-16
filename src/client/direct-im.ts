@@ -9,6 +9,7 @@ import type { Logger, TimerApi } from '../wire/types.js';
 import type { DirectImEnd, DirectImOffer, DirectImState, DirectImStatus, DirectMessage, OutgoingDirectMessage } from '../model/direct-im.js';
 import { normalizeScreenName } from '../model/screen-name.js';
 import { OscarError } from './errors.js';
+import { offerAllowed } from './guard.js';
 import { OdcSession } from './odc-session.js';
 import type { OdcFailure } from './odc-session.js';
 import type { PeerLink } from './peer-link.js';
@@ -34,6 +35,8 @@ export type DirectImDeps = {
   /** Sends one ICBM 0x04/0x06 body on the BOS link. It rejects when the session is not online. */
   send(body: Uint8Array): Promise<void>;
   isBlocked(name: string): boolean;
+  /** Asked one time for each offer that comes. Only true keeps the offer. For each other result, nothing is sent and nothing is kept. */
+  allowOffer(from: string): boolean;
   maxMessageBytes: number;
   maxAttachments: number;
   maxTextBytes: number;
@@ -187,6 +190,10 @@ export class DirectIm {
     const { log } = this.deps;
     if (this.deps.isBlocked(message.fromDisplay)) {
       log.debug('dropped a direct im offer from a blocked name');
+      return;
+    }
+    if (!offerAllowed(this.deps.allowOffer, message.fromDisplay, log, 'direct im')) {
+      log.debug('dropped a direct im offer that the host does not allow');
       return;
     }
     if (message.sequence !== 1 || message.useProxy || !message.address) {

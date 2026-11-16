@@ -136,6 +136,7 @@ function rig(over: Partial<DirectImDeps> = {}): Rig {
     self: () => 'Bob',
     send,
     isBlocked: (name) => one.blocked.has(name.toLowerCase()),
+    allowOffer: () => true,
     maxMessageBytes: DIRECT_IM_MAX_MESSAGE_BYTES,
     maxAttachments: DIRECT_IM_MAX_ATTACHMENTS,
     maxTextBytes: DIRECT_IM_MAX_TEXT_BYTES,
@@ -203,6 +204,143 @@ async function offering(r: Rig): Promise<string> {
 }
 
 describe('a Direct IM proposal the client hears', () => {
+  it('a proposal that allowOffer refuses emits nothing, sends nothing and takes no place', async () => {
+    const asked: string[] = [];
+    const r = rig({
+      allowOffer: (from) => {
+        asked.push(from);
+        return !from.startsWith('Mallory');
+      },
+    });
+    // A second and a third offer of one name, then an offer with no address and an offer with sequence 2.
+    for (const cookie of [1n, 2n, 3n]) expect(r.d.handle(proposal({ from: 'Mallory', cookie }))).toBe(true);
+    expect(r.d.handle(proposal({ from: 'Mallory', cookie: 4n, address: { ip: '0.0.0.0', port: 5190 } }))).toBe(true);
+    expect(r.d.handle(proposal({ from: 'Mallory', cookie: 5n, sequence: 2 }))).toBe(true);
+    for (let i = 0; i < MAX_WAITING_OFFERS + 4; i++) r.d.handle(proposal({ from: `Mallory${i}`, cookie: BigInt(100 + i) }));
+    await tick();
+    expect(r.offers).toEqual([]);
+    expect(r.statuses).toEqual([]);
+    expect(r.sent).toEqual([]);
+    expect(() => r.d.accept('mallory:0000000000000001')).toThrow(expect.objectContaining(INVALID));
+    // The offers of allowed names still have each place.
+    for (let i = 0; i < MAX_WAITING_OFFERS; i++) r.d.handle(proposal({ from: `Peer${i}`, cookie: BigInt(i + 1) }));
+    await tick();
+    expect(r.offers).toHaveLength(MAX_WAITING_OFFERS);
+    expect(r.sent).toEqual([]);
+    expect(asked).toContain('Mallory');
+    expect(asked).toContain('Peer0');
+  });
+
+  it('a blocked name is not shown to allowOffer', () => {
+    const asked: string[] = [];
+    const r = rig({
+      allowOffer: (from) => {
+        asked.push(from);
+        return true;
+      },
+    });
+    r.blocked.add('alice');
+    r.d.handle(proposal());
+    expect(asked).toEqual([]);
+  });
+
+  it('a rule that throws drops the offer: nothing is sent, nothing is shown, and the next offer is heard', async () => {
+    const captured = captureLog();
+    let fail = true;
+    const r = rig({
+      log: captured.log,
+      allowOffer: () => {
+        if (fail) throw new Error('the list of Cathy is gone');
+        return true;
+      },
+    });
+    expect(r.d.handle(proposal())).toBe(true);
+    expect(r.d.handle(proposal({ cookie: 9n, sequence: 2 }))).toBe(true);
+    await tick();
+    expect([r.offers, r.statuses, r.sent, r.timers.pending()]).toEqual([[], [], [], []]);
+    const warned = captured.lines.filter((l) => l.level === 'warn');
+    expect(warned.map((l) => [l.msg, l.fields])).toEqual(Array(2).fill(['the rule for direct im offers threw, and the offer is dropped', { error: 'Error' }]));
+    expect(captured.text()).not.toContain('Cathy');
+    fail = false;
+    r.d.handle(proposal());
+    expect(r.offers.map((o) => o.id)).toEqual([OFFER]);
+  });
+
+  it.each([
+    ['a promise', (): unknown => Promise.resolve(true)],
+    ['a number', (): unknown => 1],
+    ['a string', (): unknown => 'yes'],
+    ['nothing', (): unknown => undefined],
+  ])('a rule that gives %s, not true, drops the offer', async (_name, answer) => {
+    const captured = captureLog();
+    const r = rig({ log: captured.log, allowOffer: answer as () => boolean });
+    expect(r.d.handle(proposal())).toBe(true);
+    await tick();
+    expect([r.offers, r.statuses, r.sent, r.timers.pending()]).toEqual([[], [], [], []]);
+    expect(captured.lines.filter((l) => l.level === 'warn').map((l) => l.msg)).toEqual(['the rule for direct im offers gave a value that is not true or false, and the offer is dropped']);
+  });
+
+  it('a dropped offer leaves nothing: a cancel for it has no effect, and the same cookie is a new offer when the rule allows it', async () => {
+    let allow = false;
+    const asked: string[] = [];
+    const r = rig({
+      allowOffer: (from) => {
+        asked.push(from);
+        return allow;
+      },
+    });
+    r.d.handle(proposal());
+    expect(r.timers.pending()).toEqual([]);
+    expect(r.d.handle(cancelFrom('Alice', RDV_CANCEL_DECLINED))).toBe(true);
+    await r.d.decline(OFFER);
+    await r.d.close(OFFER);
+    await tick();
+    expect([r.offers, r.statuses, r.sent]).toEqual([[], [], []]);
+    // The cancel is not an offer, thus the rule is not asked for it.
+    expect(asked).toEqual(['Alice']);
+    allow = true;
+    r.d.handle(proposal());
+    expect(r.offers.map((o) => o.id)).toEqual([OFFER]);
+    expect(r.sent).toEqual([]);
+  });
+
+  it('an offer that waits stays when the rule drops the next offer of that name: no cancel goes for one or the other', async () => {
+    let allow = true;
+    const r = rig({ allowOffer: () => allow });
+    r.d.handle(proposal());
+    allow = false;
+    r.d.handle(proposal({ cookie: 2n }));
+    await tick();
+    expect(r.offers.map((o) => o.id)).toEqual([OFFER]);
+    expect([r.statuses, r.sent]).toEqual([[], []]);
+    // The offer that waits has its timer, and the client can accept it.
+    expect(r.timers.pending()).toEqual([OFFER_ACCEPT_MS]);
+    r.d.accept(OFFER);
+    await tick();
+    expect(trail(r)).toEqual(['connecting', 'open']);
+  });
+
+  it('the rule is asked for an offer that crosses the offer of this client, and a dropped offer leaves the offer of this client as it is', async () => {
+    const asked: string[] = [];
+    const r = rig({
+      self: () => 'Zed',
+      allowOffer: (from) => {
+        asked.push(from);
+        return false;
+      },
+    });
+    r.d.open('Alice');
+    await tick();
+    const before = r.sent.length;
+    // Alice sorts before Zed, thus the offer of Alice is the offer that stays for two crossed offers.
+    expect(r.d.handle(proposal({ cookie: 2n }))).toBe(true);
+    await tick();
+    expect(asked).toEqual(['Alice']);
+    expect(r.sent).toHaveLength(before);
+    // The offer of this client still waits for Alice.
+    expect([r.offers, trail(r)]).toEqual([[], ['waiting']]);
+  });
+
   it('a proposal from a blocked name emits nothing and sends nothing', async () => {
     const r = rig();
     r.blocked.add('alice');

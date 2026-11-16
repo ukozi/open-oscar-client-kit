@@ -494,6 +494,13 @@ export class Feedbag {
     this.ready = true;
   }
 
+  /** Reads the items and asks for no rights. This is for a copy of the list that serves one item. */
+  async loadItems(link: BosLink): Promise<void> {
+    this.cluster = null;
+    this.loaded = await this.query(link);
+    this.ready = true;
+  }
+
   use(link: BosLink): Promise<void> {
     return link.send(FAMILY_FEEDBAG, FEEDBAG_USE);
   }
@@ -740,5 +747,53 @@ export class Feedbag {
       this.deps.log.warn('could not reload the buddy list', 'code' in info ? { kind: info.kind, code: info.code } : { kind: info.kind });
     }
     throw new ListWriteError(failure, reloaded);
+  }
+}
+
+type Held = { link: BosLink; list: Feedbag; loaded: Promise<Feedbag>; users: number };
+
+/**
+ * A copy of the server's list for a client that holds no list.
+ * The first user reads the list one time. The copy then applies the writes of other sessions.
+ * The copy is let go when its last user ends.
+ */
+export class FeedbagCopy {
+  private held: Held | null = null;
+
+  constructor(private readonly deps: Pick<FeedbagDeps, 'log'>) {}
+
+  /** `open` reads the list at its first call. Users at the same time on one link share one copy, so their writes go in sequence. */
+  async during<T>(link: BosLink, run: (open: () => Promise<Feedbag>) => Promise<T>): Promise<T> {
+    let taken: Held | null = null;
+    const open = (): Promise<Feedbag> => {
+      taken ??= this.take(link);
+      return taken.loaded;
+    };
+    try {
+      return await run(open);
+    } finally {
+      if (taken) this.release(taken);
+    }
+  }
+
+  handle(snac: Snac): void {
+    this.held?.list.handle(snac);
+  }
+
+  private take(link: BosLink): Held {
+    if (this.held?.link === link) {
+      this.held.users++;
+      return this.held;
+    }
+    const list = new Feedbag({ log: this.deps.log });
+    const held: Held = { link, list, loaded: list.loadItems(link).then(() => list), users: 1 };
+    held.loaded.catch(quiet);
+    this.held = held;
+    return held;
+  }
+
+  private release(held: Held): void {
+    held.users--;
+    if (held.users === 0 && this.held === held) this.held = null;
   }
 }

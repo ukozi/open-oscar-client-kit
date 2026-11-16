@@ -292,8 +292,6 @@ describe('sessionBuddies', () => {
       c.disallow('Carol'),
       c.addBlocked('Carol'),
       c.removeBlocked('Carol'),
-      c.setOwnIcon(Uint8Array.of(1, 2, 3)),
-      c.clearOwnIcon(),
     ];
     for (const write of writes) expect(await infoOf(write)).toEqual(refused);
     await roundTrip();

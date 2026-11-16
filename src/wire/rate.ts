@@ -71,16 +71,29 @@ export function decodeRateParamChange(body: Uint8Array): { code: number; params:
   return { code, params: readRateClass(r, r.remaining >= RATE_CLASS_RECORD_LENGTH_V2) };
 }
 
+/** The default of `marginMs`: a send can reach the server this much nearer to the send before it and cause no alert. */
+export const PACE_MARGIN_MS = 250;
+
 export class RateGovernor {
   private readonly now: () => number;
+  private readonly marginMs: number;
   private params: RateClassParams | null = null;
   private level = 0;
   private lastAt = 0;
   private limited = false;
   private troubleAt = Number.NEGATIVE_INFINITY;
 
-  constructor(opts: { now: () => number }) {
+  /**
+   * The pacing keeps the level a margin above the line of the server. The margin is `ceil(marginMs / windowSize) + windowSize` of level.
+   * The first part is for the arrival times, and the second part is for the rounding. The second part stays when `marginMs` is 0.
+   * The margin can move the first wait of a burst to an earlier send. In its first waits, a burst falls behind by approximately the margin times `windowSize`, in milliseconds.
+   * After that, each paced wait is longer by the margin, in milliseconds.
+   * A `marginMs` that is not a number gives the default.
+   */
+  constructor(opts: { now: () => number; marginMs?: number | undefined }) {
     this.now = opts.now;
+    const marginMs = opts.marginMs ?? PACE_MARGIN_MS;
+    this.marginMs = Number.isNaN(marginMs) ? PACE_MARGIN_MS : Math.max(0, marginMs);
   }
 
   seed(params: RateClassParams): void {
@@ -96,10 +109,23 @@ export class RateGovernor {
     return this.level < this.params.alertLevel ? 'alert' : 'clear';
   }
 
+  // The server and the model round each level down. The server counts the time between arrivals, and the model the time between sends.
+  // Thus the two levels are not the same. Arrival times that move by `marginMs` put the server `marginMs / windowSize` lower at most.
+  // The rounding puts the server less than `windowSize` lower.
+  private margin(p: RateClassParams): number {
+    const window = Math.max(1, p.windowSize);
+    return Math.ceil(this.marginMs / window) + window;
+  }
+
+  /**
+   * How long until a send leaves the level at the line of the server plus the margin.
+   * The line is the clear level while the class is limited, and the alert level otherwise: the server ends an alert at the alert level.
+   */
   waitMs(): number {
     const p = this.params;
     if (!p) return 0;
-    const target = this.limited ? p.clearLevel : p.alertLevel;
+    const line = this.limited ? p.clearLevel : p.alertLevel;
+    const target = Math.min(p.maxLevel, line + this.margin(p));
     const needed = target * p.windowSize - this.level * (p.windowSize - 1);
     return Math.max(0, needed - (this.now() - this.lastAt));
   }
@@ -127,12 +153,15 @@ export class RateGovernor {
   }
 
   notice(code: number, params: RateClassParams): RateStatus {
-    if (!this.params) this.lastAt = this.now();
+    const trouble = code === RATE_CODE_LIMITED || code === RATE_CODE_ALERT;
+    // A level far below the level of this model comes from sends that this model did not count. The time of the last of them is not known.
+    const uncounted = trouble && this.params !== null && params.currentLevel < this.level - this.margin(params);
+    if (!this.params || uncounted) this.lastAt = this.now();
     this.params = params;
     this.level = params.currentLevel;
     if (code === RATE_CODE_LIMITED) this.limited = true;
     if (code === RATE_CODE_CLEAR) this.limited = false;
-    if (code === RATE_CODE_LIMITED || code === RATE_CODE_ALERT) this.troubleAt = this.now();
+    if (trouble) this.troubleAt = this.now();
     return this.status();
   }
 
@@ -141,9 +170,9 @@ export class RateGovernor {
   }
 }
 
-export function createRoomPacer(now: () => number): RoomPacer {
+export function createRoomPacer(now: () => number, marginMs?: number): RoomPacer {
   // Room sessions never have the bot flag, so the server's limiter controls a room also when BOS is exempt.
-  const governor = new RateGovernor({ now });
+  const governor = new RateGovernor({ now, marginMs });
   let classId = CHAT_SEND_RATE_CLASS;
   return {
     seed(rateParamsReply) {

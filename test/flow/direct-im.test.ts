@@ -394,6 +394,54 @@ describe('Direct IM between two clients', () => {
     await expect(bob.client.openDirectIm('Alice')).rejects.toMatchObject(INVALID);
   });
 
+  it('the allowOffer of fileTransfer is not asked for a Direct IM offer: Bob sees the offer', async () => {
+    const asked: string[] = [];
+    await start({
+      bob: {
+        directIm: {},
+        fileTransfer: {
+          allowOffer: (from) => {
+            asked.push(from);
+            return false;
+          },
+        },
+      },
+    });
+    const id = await alice.client.openDirectIm('Bob');
+    const offer = await offerAt(bob);
+    expect(offer.from).toBe('Alice');
+    expect(asked).toEqual([]);
+    expect(trail(alice, id)).toEqual(['waiting']);
+  });
+
+  it('allowOffer false on Bob: no offer is shown, and a second proposal from Alice gets no answer too', async () => {
+    const asked: string[] = [];
+    await start({
+      bob: {
+        directIm: {
+          allowOffer: (from) => {
+            asked.push(from);
+            return false;
+          },
+        },
+      },
+    });
+    const id = await alice.client.openDirectIm('Bob');
+    await waitFor(() => asked.length === 1, 'the first offer reaches Bob');
+    const link = (alice.client as unknown as { link: BosLink }).link;
+    const other = 0x0102030405060708n;
+    await link.send(FAMILY_ICBM, ICBM_MSG_TO_HOST, encodeDirectImProposal(other, 'Bob', { sequence: 1, address: { ip: '0.0.0.0', port: 5190 } }));
+    await paced(() => asked.length === 2);
+    await imRoundTrip(fake, bob);
+    await imRoundTrip(fake, alice);
+    expect(asked).toEqual(['Alice', 'Alice']);
+    expect(bob.directImOffers).toEqual([]);
+    expect(bob.directIms).toEqual([]);
+    // A cancel from Bob ends the session of Alice and the session of the relay.
+    expect(trail(alice, id)).toEqual(['waiting']);
+    expect(fake.relaySessions()).toHaveLength(2);
+  });
+
   it('a second proposal from Alice while the first waits ends the first offer of Bob cancelled by peer, and the second opens', async () => {
     await start();
     const id = await alice.client.openDirectIm('Bob');

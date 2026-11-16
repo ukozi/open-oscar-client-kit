@@ -140,6 +140,7 @@ function rig(over: Partial<TransfersDeps> & { open?: typeof openPeerLink } = {})
     rendezvous,
     send,
     isBlocked: (name) => one.blocked.has(name.toLowerCase()),
+    allowOffer: () => true,
     emitOffer: (offer) => one.offers.push(offer),
     emitTransfer: (status) => one.statuses.push(status),
     cookie: () => COOKIE,
@@ -296,6 +297,107 @@ describe('a proposal the client hears', () => {
     r.t.handle(proposal({ cookie: 1n, file: { multiple: true, count: 3, totalBytes: 30, name: 'Plans\\*' } }));
     r.t.handle(proposal({ cookie: 2n, file: { multiple: true, count: 16, totalBytes: 40, name: 'Plans' } }));
     expect(r.offers.map(({ count, name, folder }) => [count, name, folder])).toEqual([[3, 'Plans\\*', 'Plans'], [16, 'Plans', 'Plans']]);
+  });
+
+  it('a proposal that allowOffer refuses emits nothing, sends nothing and takes no place', async () => {
+    const asked: string[] = [];
+    const r = rig({
+      allowOffer: (from) => {
+        asked.push(from);
+        return from !== 'Mallory';
+      },
+    });
+    expect(r.t.handle(proposal({ from: 'Mallory' }))).toBe(true);
+    expect(r.t.handle(proposal({ from: 'Mallory', cookie: 8n, address: { ip: '0.0.0.0', port: 5190 } }))).toBe(true);
+    expect(r.t.handle(proposal({ from: 'Mallory', cookie: 9n, sequence: 2 }))).toBe(true);
+    for (let i = 0; i < MAX_WAITING_OFFERS + 4; i++) r.t.handle(proposal({ from: 'Mallory', cookie: BigInt(100 + i) }));
+    await tick();
+    expect(r.offers).toEqual([]);
+    expect(r.statuses).toEqual([]);
+    expect(r.sent).toEqual([]);
+    expect(() => r.t.accept('mallory:0102030405060708', sink)).toThrow(expect.objectContaining(INVALID));
+    // The offers of an allowed name still have each place.
+    for (let i = 1; i <= MAX_WAITING_OFFERS; i++) r.t.handle(proposal({ cookie: BigInt(i) }));
+    await tick();
+    expect(r.offers).toHaveLength(MAX_WAITING_OFFERS);
+    expect(r.sent).toEqual([]);
+    expect(new Set(asked)).toEqual(new Set(['Mallory', 'Alice']));
+  });
+
+  it('a blocked name is not shown to allowOffer', () => {
+    const asked: string[] = [];
+    const r = rig({
+      allowOffer: (from) => {
+        asked.push(from);
+        return true;
+      },
+    });
+    r.blocked.add('alice');
+    r.t.handle(proposal());
+    expect(asked).toEqual([]);
+  });
+
+  it('a rule that throws drops the offer: nothing is sent, nothing is shown, and the next offer is heard', async () => {
+    const captured = captureLog();
+    let fail = true;
+    const r = rig({
+      log: captured.log,
+      allowOffer: () => {
+        if (fail) throw new Error('the list of Cathy is gone');
+        return true;
+      },
+    });
+    expect(r.t.handle(proposal())).toBe(true);
+    expect(r.t.handle(proposal({ cookie: 9n, sequence: 2 }))).toBe(true);
+    await tick();
+    expect([r.offers, r.statuses, r.sent, r.timers.pending()]).toEqual([[], [], [], []]);
+    const warned = captured.lines.filter((l) => l.level === 'warn');
+    expect(warned.map((l) => [l.msg, l.fields])).toEqual(Array(2).fill(['the rule for file offers threw, and the offer is dropped', { error: 'Error' }]));
+    expect(captured.text()).not.toContain('Cathy');
+    fail = false;
+    r.t.handle(proposal());
+    expect(r.offers.map((o) => o.id)).toEqual([ID]);
+  });
+
+  it.each([
+    ['a promise', (): unknown => Promise.resolve(true)],
+    ['a number', (): unknown => 1],
+    ['a string', (): unknown => 'yes'],
+    ['nothing', (): unknown => undefined],
+  ])('a rule that gives %s, not true, drops the offer', async (_name, answer) => {
+    const captured = captureLog();
+    const r = rig({ log: captured.log, allowOffer: answer as () => boolean });
+    expect(r.t.handle(proposal())).toBe(true);
+    await tick();
+    expect([r.offers, r.statuses, r.sent, r.timers.pending()]).toEqual([[], [], [], []]);
+    expect(captured.lines.filter((l) => l.level === 'warn').map((l) => l.msg)).toEqual(['the rule for file offers gave a value that is not true or false, and the offer is dropped']);
+  });
+
+  it('a dropped offer leaves nothing: a cancel for it has no effect, and the same cookie is a new offer when the rule allows it', async () => {
+    let allow = false;
+    const asked: string[] = [];
+    const r = rig({
+      allowOffer: (from) => {
+        asked.push(from);
+        return allow;
+      },
+    });
+    r.t.handle(proposal());
+    expect(r.timers.pending()).toEqual([]);
+    expect(r.t.handle(toClient(encodeRendezvousCancel(COOKIE, 'Bob', 'send-file', RDV_CANCEL_DECLINED), 'Alice'))).toBe(true);
+    await expect(r.t.decline(ID)).resolves.toBeUndefined();
+    await r.t.cancel(ID);
+    await tick();
+    expect([r.offers, r.statuses, r.sent]).toEqual([[], [], []]);
+    // The cancel is not an offer, thus the rule is not asked for it.
+    expect(asked).toEqual(['Alice']);
+    allow = true;
+    r.t.handle(proposal());
+    expect(r.offers.map((o) => o.id)).toEqual([ID]);
+    expect(r.sent).toEqual([]);
+    // The rule is not asked again for an offer that the client holds.
+    r.t.handle(proposal());
+    expect(asked).toEqual(['Alice', 'Alice']);
   });
 
   it('the same proposal a second time adds no offer', () => {

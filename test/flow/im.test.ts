@@ -254,17 +254,40 @@ describe('instant messages', () => {
     server.spend('alice', 3, 4);
     await waitFor(() => h.logs.lines.some((l) => l.msg === 'rate notice'), 'the alert notice');
     const send = track(h.client.sendIm('Bob', text('held back')));
-    await timers.advance(10_000);
+    await timers.advance(7500);
     await settle(server.port);
     expect(send.done).toBe(false);
     expect(imsSent()).toEqual([]);
-    // Ten seconds on, the level has recovered: the monitor reports clear (code 4).
+    // 7500 ms on, one more send is over the alert line: the monitor reports clear (code 4).
     server.rateTick('alice');
+    await waitFor(() => h.logs.lines.filter((l) => l.msg === 'rate notice').length === 2, 'the clear notice');
+    // The hold is over. The pacing keeps the IM until a send is the margin over the line: 20 * 5033 - 19 * 4886 = 7826 ms after the alert.
+    expect(timers.pending()).toContain(326);
+    await timers.advance(326);
     await settled(send, 'the held IM to be acknowledged');
     expect(send.error).toBeUndefined();
     expect(server.rateNotices('alice').map((n) => n.code)).toEqual([2, 4]);
     expect(bob.ims().map(html)).toEqual(['held back']);
     expect(h.rates).toEqual([]);
+  });
+
+  it('holds IMs after an alert caused by another session until its own count of the level is back at the alert level and the margin, when the server stays silent', async () => {
+    await h.signOn();
+    server.spend('alice', 3, 4);
+    await waitFor(() => h.logs.lines.some((l) => l.msg === 'rate notice'), 'the alert notice');
+    const send = track(h.client.sendIm('Bob', text('held back')));
+    // The notice has level 4886. A send leaves it at 5033 after 20 * 5033 - 19 * 4886 = 7826 ms.
+    await timers.advance(7825);
+    await settle(server.port);
+    expect(send.done).toBe(false);
+    expect(imsSent()).toEqual([]);
+    await timers.advance(1);
+    await settled(send, 'the held IM to be acknowledged');
+    expect(send.error).toBeUndefined();
+    // The send is over the alert line, thus the server reports clear with it.
+    expect(server.rateNotices('alice')).toEqual([{ code: 2, classId: 3, level: 4886 }, { code: 4, classId: 3, level: 5033 }]);
+    expect(server.dropped('alice')).toBe(0);
+    expect(bob.ims().map(html)).toEqual(['held back']);
   });
 
   it('a malformed IM is logged and skipped and the session continues', async () => {
@@ -296,51 +319,133 @@ describe('IMs held by a rate alert', () => {
   async function restart(opts: { rateMonitor: boolean }): Promise<void> {
     await server.stop();
     lag = 0;
-    server = await FakeOscarServer.start({ now: () => timers.now() + lag, timers: timers.api, rateMonitor: opts.rateMonitor });
+    // The clock of the server does not go back when the lag falls.
+    let latest = 0;
+    const now = (): number => {
+      latest = Math.max(latest, timers.now() + lag);
+      return latest;
+    };
+    server = await FakeOscarServer.start({ now, timers: timers.api, rateMonitor: opts.rateMonitor });
     server.addUser('Alice', 'alicepw1');
     h = makeClient(server, { timers });
     bob = server.peer('Bob');
   }
 
-  // Six IMs. The fourth arrives 5 ms late, so the server counts the fifth 5 ms early: level 4999, an alert.
+  // Six IMs. The first four arrive 800 ms late and the fifth on time, so the server counts the fifth 800 ms early: level 4993, an alert.
   async function burstIntoAlert(): Promise<Outcome[]> {
+    lag = 800;
     await h.signOn();
     const sends = Array.from({ length: 6 }, (_, i) => track(h.client.sendIm('Bob', text(`message ${i}`))));
     await timers.advance(0);
     await waitFor(() => sends.filter((s) => s.done).length === 3, 'the first three acknowledgements');
-    lag = 5;
-    await timers.advance(2264);
+    await timers.advance(2924);
     await settled(sends[3] as Outcome, 'the acknowledgement of message 3');
     lag = 0;
-    await timers.advance(5000);
+    await timers.advance(5033);
     await settled(sends[4] as Outcome, 'the acknowledgement of message 4');
     await waitFor(() => h.logs.lines.some((l) => l.msg === 'rate notice'), 'the alert notice');
-    expect(server.rateNotices('alice')).toEqual([{ code: 2, classId: 3, level: 4999 }]);
+    expect(server.rateNotices('alice')).toEqual([{ code: 2, classId: 3, level: 4993 }]);
     expect(sends[5]?.done).toBe(false);
     return sends;
   }
+
+  // The clock goes from timer to timer. At each timer it waits until the server acknowledged each IM that the client let go.
+  async function runOut(sends: Outcome[], beforeEach: () => void = () => {}): Promise<void> {
+    const end = timers.now() + 900_000;
+    while (sends.some((s) => !s.done) && timers.now() < end) {
+      beforeEach();
+      await timers.advance(timers.pending()[0] ?? 1000);
+      await settle(server.port);
+      await waitFor(() => sends.filter((s) => s.done).length >= imsSent().length, 'the acknowledgement of each IM that the server has');
+    }
+  }
+
+  // The same numbers for each run of one seed.
+  function numbers(seed: number): () => number {
+    let x = seed;
+    return () => {
+      x = (x * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return x / 2_147_483_648;
+    };
+  }
+
+  it('a burst of ten IMs that arrive 5 ms early or late raises no alert and takes the paced time', async () => {
+    await restart({ rateMonitor: false });
+    await h.signOn();
+    const start = timers.now();
+    const order = Array.from({ length: 10 }, (_, i) => `message ${i}`);
+    const sends = order.map((words) => track(h.client.sendIm('Bob', text(words))));
+    await timers.advance(0);
+    await waitFor(() => sends.filter((s) => s.done).length === 3, 'the first three acknowledgements');
+    let late = true;
+    await runOut(sends, () => {
+      // Each second arrival is 5 ms late, thus the server counts the gap after it 5 ms short.
+      lag = late ? 5 : 0;
+      late = !late;
+    });
+    expect(sends.map((s) => [s.done, s.error])).toEqual(order.map(() => [true, undefined]));
+    expect(server.rateNotices('alice')).toEqual([]);
+    expect(h.logs.text()).not.toContain('rate hold');
+    // Three IMs at once, the fourth after 2924 ms, then one each 5033 ms: 858 ms more than with no margin.
+    expect(timers.now() - start).toBe(2924 + 6 * 5033);
+    expect(bob.ims().map(html)).toEqual(order);
+    expect(server.dropped('alice')).toBe(0);
+  });
+
+  it.each([
+    [1, false], [2, false], [3, false], [1, true], [2, true], [3, true],
+  ])('30 IMs that arrive up to 3 s late, seed %i, monitor %s: the class is never limited, and no IM waits long', async (seed, rateMonitor) => {
+    await restart({ rateMonitor });
+    await h.signOn();
+    const start = timers.now();
+    const random = numbers(seed);
+    const order = Array.from({ length: 30 }, (_, i) => `message ${i}`);
+    const sends = order.map((words) => track(h.client.sendIm('Bob', text(words))));
+    let seen = -1;
+    let longest = 0;
+    let last = start;
+    await runOut(sends, () => {
+      const count = imsSent().length;
+      if (count === seen) return;
+      if (count > 3 && seen >= 0) longest = Math.max(longest, timers.now() - last);
+      last = timers.now();
+      seen = count;
+      lag = Math.floor(random() * 3000);
+    });
+    expect(sends.map((s) => [s.done, s.error])).toEqual(order.map(() => [true, undefined]));
+    expect(h.client.state).toBe('online');
+    expect(server.dropped('alice')).toBe(0);
+    expect(server.rateNotices('alice').filter((n) => n.code === 3)).toEqual([]);
+    expect(server.rateNotices('alice').every((n) => n.level >= 4000)).toBe(true);
+    expect(h.rates).toEqual([]);
+    expect(bob.ims().map(html)).toEqual(order);
+    // The longest wait goes from the lowest level of an alert here back to the alert level and the margin.
+    expect(longest).toBeLessThanOrEqual(12_000);
+    expect(timers.now() - start).toBeLessThanOrEqual(30 * 7200);
+  });
 
   it('a burst goes out between the alerts and the clears of the rate monitor of the server', async () => {
     await restart({ rateMonitor: true });
     await h.signOn();
     const sends = Array.from({ length: 6 }, (_, i) => track(h.client.sendIm('Bob', text(`message ${i}`))));
-    // Each second the monitor reports an alert when one more send is under the alert level, then clear.
-    for (let second = 0; second < 16 && !sends[5]?.done; second++) {
-      await timers.advance(1000);
-      await settle(server.port);
-    }
-    await settled(sends[5] as Outcome, 'the acknowledgement of message 5');
-    expect(sends.map((s) => s.error)).toEqual(sends.map(() => undefined));
-    expect(server.rateNotices('alice').map((n) => n.code).slice(0, 6)).toEqual([2, 4, 2, 4, 2, 4]);
+    const start = timers.now();
+    await timers.advance(0);
+    await waitFor(() => sends.filter((s) => s.done).length === 3, 'the first three acknowledgements');
+    // Each second the monitor reports an alert when one more send is under the alert level. The send that the client lets go is over the alert level, thus the server reports clear with it.
+    await runOut(sends);
+    expect(sends.map((s) => [s.done, s.error])).toEqual(sends.map(() => [true, undefined]));
+    expect(server.rateNotices('alice').map((n) => [n.code, n.level])).toEqual([[2, 5144], [4, 5033], [2, 5033], [4, 5033], [2, 5033], [4, 5033]]);
+    // An alert does not make the burst longer: the sends go at 2924 ms and then each 5033 ms, as with no notice.
+    expect(timers.now() - start).toBe(2924 + 2 * 5033);
     expect(bob.ims().map(html)).toEqual(sends.map((_, i) => `message ${i}`));
     expect(server.dropped('alice')).toBe(0);
   });
 
-  it('goes out after a bounded time when the server never reports clear', async () => {
+  it('goes out when the count of the client is back at the alert level and the margin, when the server never reports clear', async () => {
     await restart({ rateMonitor: false });
     const sends = await burstIntoAlert();
-    // The level is back at 5000 after 5019 ms. The hold stops 60 s after that.
-    await timers.advance(65_018);
+    // A send leaves level 4993 at 5033 after 20 * 5033 - 19 * 4993 = 5793 ms.
+    await timers.advance(5792);
     await settle(server.port);
     expect(sends[5]?.done).toBe(false);
     expect(imsSent()).toHaveLength(5);
@@ -348,7 +453,9 @@ describe('IMs held by a rate alert', () => {
     await timers.advance(1);
     await settled(sends[5] as Outcome, 'the acknowledgement of message 5');
     expect(sends[5]?.error).toBeUndefined();
-    expect(h.logs.text()).toContain('a rate hold stopped with no clear notice');
+    expect(h.logs.lines.filter((l) => l.level === 'warn' || l.level === 'error')).toEqual([]);
+    expect(h.logs.text()).toContain('a rate hold stopped: the level is back');
+    expect(server.rateNotices('alice').map((n) => [n.code, n.level])).toEqual([[2, 4993], [4, 5033]]);
     expect(bob.ims().map(html)).toEqual(sends.map((_, i) => `message ${i}`));
     expect(server.dropped('alice')).toBe(0);
   });

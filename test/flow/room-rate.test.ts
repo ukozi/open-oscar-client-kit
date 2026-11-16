@@ -108,3 +108,50 @@ describe('the maxRooms option', () => {
     expect(() => new OscarClient({ maxRooms })).toThrow(RangeError);
   });
 });
+
+describe('the paceMarginMs option', () => {
+  const imsRead = (): number => server.snacsFrom('alice').filter((s) => s.family === 0x04 && s.subtype === 0x06).length;
+
+  // Class 3 of BOS has a window of 20 and an alert level of 5000. Three IMs leave 5144, and the wait is 20 * (5000 + margin) - 19 * 5144.
+  it.each([
+    ['no option', 2924, {}],
+    ['0 ms', 2664, { paceMarginMs: 0 }],
+    ['1000 ms', 3664, { paceMarginMs: 1000 }],
+  ])('with %s the fourth IM of a burst waits %i ms', async (_name, wait, opts) => {
+    server.peer('Bob');
+    const h = await signedOn(opts);
+    for (let i = 0; i < 4; i++) void h.client.sendIm('Bob', [{ text: `message ${i}` }]).catch(() => {});
+    await waitFor(() => imsRead() === 3, 'the first three IMs');
+    await timers.advance(wait - 1);
+    await settle(server.port);
+    expect(imsRead()).toBe(3);
+    await timers.advance(1);
+    await waitFor(() => imsRead() === 4, 'the fourth IM');
+  });
+
+  // The room class has a window of 80 and a clear level of 3000. The limit notice has level 1499, and the wait is 80 * (3000 + margin) - 79 * 1499.
+  it.each([
+    ['no option', 128_299, {}],
+    ['0 ms', 127_979, { paceMarginMs: 0 }],
+    ['1000 ms', 129_019, { paceMarginMs: 1000 }],
+  ])('with %s a room message after a limit notice waits %i ms', async (_name, wait, opts) => {
+    const h = await signedOn(opts);
+    const rates: RoomRate[] = [];
+    h.client.on('roomRate', (rate) => rates.push(rate));
+    await h.client.joinRoom(ROOM);
+    server.rooms.setRoomRate('Alice', ROOM, 'limited');
+    await waitFor(() => rates.length === 1, 'the limited notice');
+    const before = timers.pending();
+    void h.client.sendRoomMessage(ROOM_ID, [{ text: 'held' }]).catch(() => {});
+    await waitFor(() => timers.pending().length > before.length, 'the wait of the room');
+    expect(timers.pending().filter((ms) => !before.includes(ms))).toEqual([wait]);
+  });
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('paceMarginMs %s throws a RangeError', (paceMarginMs) => {
+    expect(() => new OscarClient({ paceMarginMs })).toThrow(RangeError);
+  });
+
+  it('paceMarginMs 0 is taken', () => {
+    expect(() => new OscarClient({ paceMarginMs: 0 })).not.toThrow();
+  });
+});

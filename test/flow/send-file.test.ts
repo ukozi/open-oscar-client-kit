@@ -448,6 +448,33 @@ describe('Send File between two clients', () => {
     await expect(bob.client.sendFiles('Alice', [source('notes.txt', content(1))])).rejects.toMatchObject(INVALID);
   });
 
+  it('allowOffer false on Bob: no offer is shown, nothing goes back, and the next offers get no answer too', async () => {
+    const asked: string[] = [];
+    await start({
+      bob: {
+        allowOffer: (from) => {
+          asked.push(from);
+          return false;
+        },
+      },
+    });
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_WAITING_OFFERS + 2; i++) {
+      ids.push(await alice.client.sendFiles('Bob', [source(`file-${i}.txt`, content(10))]));
+      // The rate limit of the server holds a message that follows another too soon.
+      await timers.advance(10_000);
+    }
+    await waitFor(() => asked.length === ids.length, 'each offer reaches Bob');
+    await imRoundTrip(fake, bob);
+    await imRoundTrip(fake, alice);
+    expect(asked.every((from) => from === 'Alice')).toBe(true);
+    expect(bob.fileOffers).toEqual([]);
+    expect(bob.transfers).toEqual([]);
+    expect(ids.map((id) => states(alice, id))).toEqual(ids.map(() => ['waiting']));
+    // A cancel or a client error from Bob ends the session of the relay.
+    expect(fake.relaySessions()).toHaveLength(ids.length);
+  });
+
   it('a 17th waiting offer is cancelled back', async () => {
     await start();
     const ids: string[] = [];

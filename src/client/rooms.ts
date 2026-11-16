@@ -71,6 +71,8 @@ export type RoomsDeps = {
   wireDetail?: boolean;
   /** The most rooms joined at one time. The default is `MAX_ROOMS`. */
   maxRooms?: number;
+  /** The pacing margin of each room connection. The default is `PACE_MARGIN_MS`. */
+  paceMarginMs?: number | undefined;
   /** Opens the ChatNav and Chat connections with TLS. `caFile` names a PEM file of the certificates to trust. The default is plain TCP. */
   tls?: { caFile?: string };
   /** Goes to each host that the server advertises for ChatNav and Chat, also a loopback or unroutable one. `RoomsContext.pin` comes first. The default is false. */
@@ -515,7 +517,7 @@ export class Rooms {
         room: { exchange: info.exchange, name: info.name },
         link,
         self: ctx.self,
-        pacer: createRoomPacer(now),
+        pacer: createRoomPacer(now, this.deps.paceMarginMs),
         log,
         now,
         timers,

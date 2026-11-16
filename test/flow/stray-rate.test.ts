@@ -56,7 +56,7 @@ describe('a BOS rate notice on the ChatNav connection', () => {
     await send;
     expect(h.rates).toEqual([{ limited: true }, { limited: false }]);
     expect(bob.ims().map((im) => im.html)).toEqual(['held back']);
-    expect(h.logs.text()).not.toContain('a rate hold stopped with no clear notice');
+    expect(h.logs.text()).not.toContain('a rate hold stopped');
   });
 
   it('main: no notice comes there, and an IM goes out at once', async () => {
