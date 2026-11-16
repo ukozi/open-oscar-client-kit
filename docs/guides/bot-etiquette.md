@@ -16,6 +16,27 @@ Send an IM to a name only to answer an IM from that name. On Open OSCAR Server (
 
 The simple API does not join rooms. With `OscarClient` from `open-oscar-client-kit/client`, an invitation comes as the `roomInvite` event, and `joinRoom` joins a room (`src/client/oscar-client.ts`). Join a room only when someone invites the bot, and leave it when the people in it ask.
 
+## Keep only the offers that the bot wants
+
+The simple API takes no files and no Direct IM. With `OscarClient`, a file offer comes as the `fileOffer` event, and a Direct IM offer comes as the `directImOffer` event. By default, the client keeps each offer from a name that is not blocked. The `allowOffer` rule of the `fileTransfer` option, and of the `directIm` option, chooses the offers that the client keeps (`src/client/oscar-client.ts`):
+
+```js
+import { OscarClient, clientIdFor } from 'open-oscar-client-kit/client';
+import { normalizeScreenName } from 'open-oscar-client-kit/model';
+
+const known = new Set(['alice', 'bob']);
+const fromKnown = (from) => known.has(normalizeScreenName(from));
+const client = new OscarClient({
+  clientId: clientIdFor('my-bot', '1.0.0', process.platform),
+  fileTransfer: { allowOffer: fromKnown },
+  directIm: { allowOffer: fromKnown },
+});
+```
+
+The client calls the rule one time for each offer that comes, with the sender's name as the sender wrote it. An offer from a blocked name does not reach the rule. The rule is synchronous: it returns `true` or `false` at once. Only `true` keeps the offer, and the event then fires. For `false`, the client drops the offer: it sends nothing to the sender, fires no event and keeps nothing. A result that is not `true` or `false`, such as the promise of an `async` function, also drops the offer, and so does a rule that throws. The client logs a warning in these two cases (`src/client/guard.ts`).
+
+Each option has its own rule. The rule of `fileTransfer` does not apply to Direct IM offers, so a bot that takes neither sets both. The default keeps each offer.
+
 ## Back off when warned
 
 The `warned` event gives the new level and the name of the warner, or `null` for an anonymous warning. Stop answering a name that warned the bot. When the level climbs, slow down or stop for a while: each warning raises the levels the IM class must stay above.
