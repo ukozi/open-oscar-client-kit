@@ -103,7 +103,7 @@ The scenarios are in `suite/scenarios.ts`, in this order:
 
 `burst` has a time limit of 150 s. Every other scenario has 60 s. The suite waits 10 s for each reply (`suite/driver-process.ts`), except the 20 `sendIm` replies of `burst`, which share the 120 s.
 
-The client keeps the IM rate class at or above its alert level: 3 IMs at once, then about one every 5 s, so `burst` takes the driver of open-oscar-client-kit about 85 s. A port that lets the class go lower finishes sooner. Below the limit level, the server drops each IM until the class is back at its clear level. The suite's server checks each class once a second, and sends a rate notice when the status of a class changed (`suite/runner.ts`). So the driver gets the clear notice with no further send. A port that sends the IMs at once goes past the class's disconnect level, and the server signs it off.
+The client keeps the IM rate class a margin above its alert level, as [rate limits](../guides/rate-limits.md) describes: 3 IMs at once, then about one every 5 s, so `burst` takes the driver of open-oscar-client-kit about 85 s. A port that lets the class go lower finishes sooner. Below the limit level, the server drops each IM until the class is back at its clear level. The suite's server checks each class once a second, and sends a rate notice when the status of a class changed (`suite/runner.ts`). So the driver gets the clear notice with no further send. A port that sends the IMs at once goes past the class's disconnect level, and the server signs it off.
 
 ## Running the suite in CI
 

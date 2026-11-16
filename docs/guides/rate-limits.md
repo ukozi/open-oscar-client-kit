@@ -23,11 +23,17 @@ In OOS's default classes, outgoing IMs are in class 3 ([wire/rate_limit.go](http
 
 ## Pacing in the client
 
-At sign-on the client reads the server's classes. After that, every SNAC in a class waits its turn in that class's queue (`src/client/bos-link.ts`). Before each send, the client works out the level the send would leave, with the server's own arithmetic (`checkRate` in `src/wire/rate.ts`). It waits until that level is at or above the alert level, or at or above the clear level while the class is limited.
+At sign-on the client reads the server's classes. After that, every SNAC in a class waits its turn in that class's queue (`src/client/bos-link.ts`). Before each send, the client works out the level the send would leave, with the server's own arithmetic (`checkRate` in `src/wire/rate.ts`). It waits until that level is a margin above the alert level, or a margin above the clear level while the class is limited. The level it waits for is never above the maximum level of the class.
 
-After an alert notice or a limited notice, the client holds the class's queue until the server reports the class clear. The program's sends wait in the queue and do not reach the server's limiter. So a fast loop of `sendIm` calls takes longer to resolve, and each call resolves when the server acknowledges its IM (`src/client/messaging.ts`). The simple API has no option that turns the pacing off.
+The server counts the time between the arrivals of two sends, and the client counts the time between the sends. The network can deliver a send nearer to the send before it, so the server's level can be lower than the client's level. The margin covers that difference. In units of level, the margin is `ceil(paceMarginMs / window) + window` (`RateGovernor` in `src/wire/rate.ts`). The first part covers arrivals that move by up to `paceMarginMs` milliseconds. The second part covers the server's rounding, and it stays when `paceMarginMs` is 0.
 
-A server can fail to send the clear notice. The client then ends the hold 60 s after the time when, by its own count from the last notice, the level is back. It logs a warning when it ends a hold this way (`src/client/bos-link.ts`).
+`paceMarginMs` is an option of `OscarClient`, and its default is 250 (`PACE_MARGIN_MS` in `src/wire/rate.ts`). It applies to the BOS connection and to each room connection. A value that is not a number of 0 or more makes the constructor throw a `RangeError` (`src/client/oscar-client.ts`). The simple API uses the default and has no option for it.
+
+The margin makes the client slower. In a class with a window of 20, the default margin is 33. With an alert level of 5000 ms, the client keeps the level at or above 5033 ms, so a steady pace is one send every 5033 ms. A burst meets its first wait sooner, and its first waits are about 660 ms longer in total, which is the margin times the window. In a class with a window of 80, the default margin is 84, and a burst falls behind by about 6720 ms.
+
+After an alert notice or a limited notice, the client holds the class's queue and sends nothing in that class. The hold ends when the server reports the class clear. The hold also ends when, by the client's own count, a send would leave the level a margin above the alert level, or a margin above the clear level after a limited notice. A held class sends nothing, and a server can send no notice for a class that sends nothing, so the client does not wait for the clear notice (`src/client/bos-link.ts`).
+
+The program's sends wait in the queue and do not reach the server's limiter. So a fast loop of `sendIm` calls takes longer to resolve, and each call resolves when the server acknowledges its IM (`src/client/messaging.ts`). The simple API has no option that turns the pacing off.
 
 A server's operator can mark an account as a bot. OOS then does not rate limit that account ([state/session.go](https://github.com/mk6i/open-oscar-server/blob/7bdd674afc482d700cc733be7c0b86a51f65883a/state/session.go#L455-L457)). By default, the client paces it all the same, from the classes the server sends.
 
