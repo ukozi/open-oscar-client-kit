@@ -10,7 +10,7 @@
 
 ### Changed
 
-- The client paces each rate class a margin above the alert level of the server. A burst of sends takes a little longer: the 20 IMs of the `burst` scenario take about 1 s more.
+- The client paces each rate class a margin above the alert level of the server. A burst of sends takes longer. The 20 IMs of the `burst` scenario take approximately 1 s more.
 - A rate hold ends when the level of the class is back, by the count of the client. The client no longer waits 60 s for a clear notice that does not come.
 - After a limited notice, the client also counts the sends that it wrote in the 2 s before the notice arrived. The server drops those sends, and each one lowers its level. The next send goes when the server is back at the clear level, so the server does not drop it.
 
