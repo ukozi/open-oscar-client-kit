@@ -129,6 +129,18 @@ describe('a peer link', () => {
     expect(timers.pending()).toEqual([]);
   });
 
+  it('binds the local address', async () => {
+    const port = await listen();
+    const o = { host: '127.0.0.1', port, log: captureLog().log, timers: timers.api };
+    // The machine does not hold this address, so the bind fails.
+    await expect(openPeerLink({ ...o, localAddress: '192.0.2.1' })).rejects.toBeInstanceOf(PeerClosedError);
+    expect(remote).toBeNull();
+    link = await openPeerLink({ ...o, localAddress: '127.0.0.1' });
+    await waitFor(() => remote !== null, 'the far end');
+    expect(remote?.remoteAddress?.replace(/^::ffff:/, '')).toBe('127.0.0.1');
+    expect(timers.pending()).toEqual([]);
+  });
+
   it('gives up on a connection that does not open in time', async () => {
     const own = new ManualTimers();
     // A reserved test address: no answer comes from it.

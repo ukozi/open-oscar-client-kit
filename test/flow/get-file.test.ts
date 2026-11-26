@@ -250,7 +250,9 @@ describe('Get File from a scripted holder', () => {
     await start();
     const id = await alice.client.browseFiles('Bob');
     await waitFor(() => fake.relaySessions().length === 1, 'the offer reaches the server');
-    await timers.advance(OFFER_ACCEPT_MS - 1);
+    // A skip, then the due timers: in five minutes of probes, one late answer of the server closes the connection.
+    timers.skip(OFFER_ACCEPT_MS - 1);
+    await timers.advance(0);
     expect(trail(id)).toEqual(['waiting']);
     await timers.advance(1);
     await ended(id, 'timed-out');
@@ -594,7 +596,9 @@ describe('Get File to a scripted requester', () => {
   it('nobody answers the request: after OFFER_ACCEPT_MS the share ends timed-out', async () => {
     await sharing();
     const { id, asking } = await asks();
-    await timers.advance(OFFER_ACCEPT_MS - 1);
+    // A skip, then the due timers: in five minutes of probes, one late answer of the server closes the connection.
+    timers.skip(OFFER_ACCEPT_MS - 1);
+    await timers.advance(0);
     expect(shareTrail(id)).toEqual(['asked']);
     await timers.advance(1);
     expect(await shareEnded(id, 'timed-out')).toEqual({ id, peer: 'Bob', state: 'closed', end: 'timed-out' });

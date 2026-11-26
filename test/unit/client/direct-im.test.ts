@@ -131,7 +131,7 @@ function rig(over: Partial<DirectImDeps> = {}): Rig {
     log,
     now: timers.now,
     timers: timers.api,
-    enabled: true,
+    enabled: () => true,
     rendezvous,
     self: () => 'Bob',
     send,
@@ -462,7 +462,7 @@ describe('a Direct IM proposal the client hears', () => {
   });
 
   it('with Direct IM off, each message is left alone and each command is refused', async () => {
-    const r = rig({ enabled: false });
+    const r = rig({ enabled: () => false });
     expect(r.d.handle(proposal())).toBe(false);
     expect(r.d.handle(clientError('Alice'))).toBe(false);
     expect(() => r.d.open('Alice')).toThrow(expect.objectContaining(INVALID));
@@ -470,6 +470,41 @@ describe('a Direct IM proposal the client hears', () => {
     await tick();
     expect(r.sent).toEqual([]);
     expect(r.offers).toEqual([]);
+  });
+
+  it('a session that runs goes on when Direct IM turns off, and a new offer is left alone', async () => {
+    let on = true;
+    const r = rig({ enabled: () => on });
+    r.d.open('Alice');
+    await tick();
+    on = false;
+    expect(r.d.handle(proposal({ sequence: 2 }))).toBe(true);
+    await tick();
+    expect(trail(r)).toEqual(['waiting', 'connecting', 'open']);
+    const before = r.sent.length;
+    expect(r.d.handle(proposal({ from: 'Carol', cookie: 9n }))).toBe(false);
+    expect(r.d.handle(clientError('Carol', 9n))).toBe(false);
+    await tick();
+    expect([r.offers, r.sent.length]).toEqual([[], before]);
+    r.link.feed(hello());
+    await tick();
+    r.link.end();
+    await tick();
+    expect(trail(r)).toEqual(['waiting', 'connecting', 'open', 'open+cookie', 'peer-closed']);
+  });
+
+  it('an offer of this client that waits still hears the decline of the peer when Direct IM turns off', async () => {
+    let on = true;
+    const r = rig({ enabled: () => on });
+    r.d.open('Alice');
+    await tick();
+    on = false;
+    expect(r.d.handle(cancelFrom('Alice', RDV_CANCEL_DECLINED))).toBe(true);
+    await tick();
+    expect(trail(r)).toEqual(['waiting', 'declined']);
+    expect(last(r)).toMatchObject({ by: 'peer' });
+    // With no session left, each message is left alone.
+    expect(r.d.handle(proposal())).toBe(false);
   });
 
   it('a message of the Send File service and the client error for a cookie of no session are left alone', () => {

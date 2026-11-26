@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PeerClosedError } from '../../../src/client/peer-link.js';
 import type { PeerLink } from '../../../src/client/peer-link.js';
 import { COUNTER_DIAL_MS, OFFER_ACCEPT_MS, Rendezvous, rendezvousEnded } from '../../../src/client/rendezvous.js';
@@ -480,5 +480,63 @@ describe('the end of an offer', () => {
     expect(dials).toHaveLength(2);
     expect(sent).toHaveLength(before);
     expect(timers.pending()).toEqual([]);
+  });
+});
+
+describe('a route and a local address', () => {
+  type Opened = { host: string; port: number; localAddress: string | undefined };
+  const LOOP = { host: '127.0.0.1', port: 4443 };
+
+  function routed(allowed: boolean, route: (address: PeerAddress) => { host: string; port: number }) {
+    const opened: Opened[] = [];
+    const allowDial = vi.fn(async (_address: PeerAddress, _service: RendezvousService) => allowed);
+    const routeFn = vi.fn(route);
+    const rendezvous = new Rendezvous({
+      log: captureLog().log,
+      timers: timers.api,
+      now: timers.now,
+      send: async (body) => {
+        sent.push(read(body));
+      },
+      allowDial,
+      route: routeFn,
+      localAddress: '127.9.0.5',
+      open: async (o) => {
+        opened.push({ host: o.host, port: o.port, localAddress: o.localAddress });
+        return fakeLink('routed');
+      },
+    });
+    return { rendezvous, opened, allowDial, route: routeFn };
+  }
+
+  it('dials the route of an allowed address, from the local address', async () => {
+    const { rendezvous, opened, allowDial, route } = routed(true, () => LOOP);
+    linked(await rendezvous.accept(proposal()));
+    expect(allowDial).toHaveBeenCalledWith({ ip: '203.0.113.7', port: 5190 }, 'send-file');
+    expect(route).toHaveBeenCalledWith({ ip: '203.0.113.7', port: 5190 });
+    expect(opened).toEqual([{ host: '127.0.0.1', port: 4443, localAddress: '127.9.0.5' }]);
+  });
+
+  it('dials the route when offering too', async () => {
+    const { rendezvous, opened } = routed(true, () => LOOP);
+    const result = rendezvous.offer('Bob', COOKIE, 'send-file', FILE);
+    rendezvous.heard(counter());
+    linked(await result);
+    expect(opened).toEqual([{ host: '127.0.0.1', port: 4443, localAddress: '127.9.0.5' }]);
+  });
+
+  it('never routes an address the rule refused', async () => {
+    const { rendezvous, opened, route } = routed(false, () => LOOP);
+    expect(ended(await rendezvous.accept(proposal()))).toEqual({ outcome: 'refused-address', by: 'self' });
+    expect(route).not.toHaveBeenCalled();
+    expect(opened).toEqual([]);
+  });
+
+  it('a route that throws ends the offer failed and opens nothing', async () => {
+    const { rendezvous, opened } = routed(true, () => {
+      throw new Error('no route');
+    });
+    expect(ended(await rendezvous.accept(proposal()))).toEqual({ outcome: 'failed', by: 'server' });
+    expect(opened).toEqual([]);
   });
 });

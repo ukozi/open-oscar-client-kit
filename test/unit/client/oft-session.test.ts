@@ -765,3 +765,46 @@ describe('one file over a link that stays open', () => {
     expect(b.closed).toBe(true);
   });
 });
+
+describe('a file with a given checksum', () => {
+  it('sends a file with a given checksum and reads it one time', async () => {
+    const [a, b] = pair();
+    const data = content(100_000);
+    const file = Object.assign(source('notes.txt', data), { checksum: oftChecksum(data) });
+    const sink = memorySink();
+    const receiving = (async () => {
+      const asked = await header(b);
+      await receiveFile(b, COOKIE, sink, { index: 0, count: 1, maxBytes: data.length }, quiet, live(), Date.now, asked);
+      return asked;
+    })();
+    expect(await sendFile(a, COOKIE, file, { index: 0, count: 1, totalBytes: data.length }, quiet, live())).toBe('sent');
+    const asked = await receiving;
+    expect(file.passes).toBe(1);
+    expect(asked.checksum).toBe(oftChecksum(data));
+    expect(joined(sink.files[0]?.chunks ?? [])).toEqual(data);
+    expect(sink.files[0]?.finished).toBe(1);
+  });
+
+  it('fails source-changed when a given checksum does not match the bytes', async () => {
+    const [a, b] = pair();
+    const data = content(10_000);
+    const file = Object.assign(source('notes.txt', data), { checksum: (oftChecksum(data) + 1) >>> 0 });
+    const sink = memorySink();
+    const receiving = failure(receiveFiles(b, COOKIE, sink, quiet, live()));
+    expect(await failure(sendFiles(a, COOKIE, [file], quiet, live()))).toBe('source-changed');
+    expect(file.passes).toBe(1);
+    expect(a.closed).toBe(true);
+    expect(await receiving).not.toBe('resolved');
+    expect(sink.files[0]?.finished).toBe(0);
+  });
+
+  it('fails source-changed when the one read gives fewer bytes than `bytes`', async () => {
+    const [a, b] = pair();
+    const data = content(900);
+    const file = Object.assign(source('notes.txt', data), { bytes: 1000, checksum: oftChecksum(data) });
+    const receiving = failure(receiveFiles(b, COOKIE, memorySink(), quiet, live()));
+    expect(await failure(sendFiles(a, COOKIE, [file], quiet, live()))).toBe('source-changed');
+    expect(file.passes).toBe(1);
+    expect(await receiving).not.toBe('resolved');
+  });
+});

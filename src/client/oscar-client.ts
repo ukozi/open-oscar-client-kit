@@ -204,6 +204,16 @@ export type OscarClientOptions = {
   /** Goes to each host that the server advertises for BOS and the services, also a loopback or unroutable one. `pinRedirects` comes first. The default is false. */
   followRedirects?: boolean;
   /**
+   * The local address that the login, the BOS connection and each peer connection bind. The login binds it only when the client logs in itself.
+   * Service connections (rooms, icons, admin, directory) do not bind. The default lets the system choose.
+   */
+  localAddress?: string;
+  /**
+   * Where the client dials for an address that a rendezvous message names. The client asks `allowDial` with the address first, then dials here.
+   * The default is the address.
+   */
+  peerRoute?: (address: PeerAddress) => { host: string; port: number };
+  /**
    * Gives the names to watch at each connect. The client sends them in 0x03/0x04 and does not hold or activate the server's list.
    * `buddyList` is empty. Each write to the list rejects with `invalid-argument`. Only `setOwnIcon` and `clearOwnIcon` can write.
    * It cannot go with `awayRecord`. The default is the server's list.
@@ -228,6 +238,8 @@ export type OscarClientOptions = {
    */
   paceMarginMs?: number;
 };
+/** The services that `setServices` turns on or off. A key that is not given stays as it is. */
+export type ServiceSwitch = { fileTransfer?: boolean; directIm?: boolean; getFile?: boolean };
 /** What a first sign-on puts back. Only a `restore` puts back the away it held, in its first Locate write, with the senders answered while away. */
 export type ResumeState = { origin: 'start' | 'restore'; invisible: boolean; away: AwayRecord | null; answered: readonly string[]; reportIdle: boolean };
 export type SignOnOptions = { profile?: RichText; resume?: ResumeState };
@@ -301,6 +313,8 @@ type BringUp = { reconnect: boolean; held: PreOnlinePlan; restore: Restore; away
 type Up = { link: BosLink; limits: SessionLimits; oserviceVersion: number; issued: IssuedTicket };
 type Evidenced = SignOnError & { readonly evidence: DropEvidence };
 
+const SERVICE_KEYS = ['fileTransfer', 'directIm', 'getFile'] as const;
+
 const silent: Logger = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 function probeFailure(error: unknown): OscarError {
@@ -324,6 +338,9 @@ export class OscarClient {
   private readonly preOnline: (ctx: PreOnlineContext) => PreOnlinePlan;
   private idleAfterSeconds: number | null = idleAfterSeconds(DEFAULT_IDLE_SETTINGS);
   private readonly signOnDeps: SignOnDeps;
+  // Which service options were given, and which of those services are on.
+  private readonly given: Required<ServiceSwitch>;
+  private readonly switched: Required<ServiceSwitch>;
   private readonly signOnService: SignOn;
   private readonly feedbag: Feedbag;
   private readonly presence: Presence;
@@ -368,6 +385,8 @@ export class OscarClient {
     this.paceMarginMs = paceMargin(opts.paceMarginMs);
     if (opts.sessionBuddies && opts.awayRecord) throw new RangeError('sessionBuddies cannot go with awayRecord');
     this.watched = opts.sessionBuddies ? new Set() : null;
+    this.given = { fileTransfer: opts.fileTransfer !== undefined, directIm: opts.directIm !== undefined, getFile: opts.getFile !== undefined };
+    this.switched = { ...this.given };
     this.legacyCharset = new TextDecoder(opts.legacyCharset ?? 'windows-1252').encoding;
     this.log = opts.log ?? silent;
     this.iconList = opts.sessionBuddies ? new FeedbagCopy({ log: this.log }) : null;
@@ -455,12 +474,14 @@ export class OscarClient {
       send: toHost,
       propose: (body, refused) => this.propose(body, refused),
       allowDial: (address, service) => this.mayDial(dialRule(service), address),
+      route: opts.peerRoute,
+      localAddress: opts.localAddress,
     });
     this.transfers = new Transfers({
       log: this.log,
       now: this.now,
       timers: this.timers,
-      enabled: opts.fileTransfer !== undefined,
+      enabled: () => this.switched.fileTransfer,
       rendezvous: this.rendezvous,
       send: toHost,
       isBlocked: (name) => this.excluded(name),
@@ -472,7 +493,7 @@ export class OscarClient {
       log: this.log,
       now: this.now,
       timers: this.timers,
-      enabled: opts.directIm !== undefined,
+      enabled: () => this.switched.directIm,
       rendezvous: this.rendezvous,
       self: () => this.signOnService.self?.screenName ?? '',
       send: toHost,
@@ -492,7 +513,7 @@ export class OscarClient {
       log: this.log,
       now: this.now,
       timers: this.timers,
-      enabled: opts.getFile !== undefined,
+      enabled: () => this.switched.getFile,
       rendezvous: this.rendezvous,
       send: toHost,
       isBlocked: (name) => this.excluded(name),
@@ -525,13 +546,14 @@ export class OscarClient {
       budget: opts.loginBudget ?? defaultLoginBudget,
       clientId: opts.clientId,
       capabilities: opts.capabilities,
-      sendFile: opts.fileTransfer !== undefined,
-      directIm: opts.directIm !== undefined,
-      getFile: opts.getFile !== undefined,
+      sendFile: () => this.switched.fileTransfer,
+      directIm: () => this.switched.directIm,
+      getFile: () => this.switched.getFile,
       buddyIcon: opts.buddyIcon === true,
       oserviceVersion: opts.oserviceVersion,
       tokenTtlSeconds: opts.tokenTtlSeconds,
       pinRedirects: opts.pinRedirects,
+      localAddress: opts.localAddress,
       tls: opts.tls,
       followRedirects: opts.followRedirects === true,
       sessionBuddies: opts.sessionBuddies,
@@ -883,6 +905,29 @@ export class OscarClient {
     const link = this.link;
     if (this.current !== 'online' || !link) return;
     return this.profiles.fetchAway(link, screenName);
+  }
+
+  /**
+   * Turns file transfer, Direct IM and Get File on or off. A key that is not given changes nothing.
+   * True for a service whose option the client did not get throws a `RangeError`.
+   * While a service is off, the client ignores its offers and refuses to start one, as without its option. A session or transfer that runs goes on.
+   * Offline, the next connect writes the capabilities. Online, one Locate write holds only the capabilities, and the result resolves when it is written.
+   */
+  setServices(on: ServiceSwitch): Promise<void> {
+    for (const key of SERVICE_KEYS) {
+      const value = on[key];
+      if (value !== undefined && typeof value !== 'boolean') throw new RangeError(`${key} must be a boolean`);
+      if (value === true && !this.given[key]) throw new RangeError(`${key} has no option`);
+    }
+    for (const key of SERVICE_KEYS) this.switched[key] = on[key] ?? this.switched[key];
+    const link = this.link;
+    if (this.current !== 'online' || !link) return Promise.resolve();
+    return this.signOnService.writeCapabilities(link);
+  }
+
+  /** Which services are on now. */
+  services(): Required<ServiceSwitch> {
+    return { ...this.switched };
   }
 
   async setInvisible(on: boolean): Promise<void> {
@@ -1421,6 +1466,12 @@ export class OscarClient {
 
   private afterOnline(link: BosLink): void {
     if (this.link !== link) return;
+    // A change during the connect can come after its Locate write.
+    if (this.signOnService.capabilitiesChanged) {
+      void this.signOnService.writeCapabilities(link).catch((error: unknown) => {
+        this.log.warn('the capabilities were not written', { error: error instanceof Error ? error.name : typeof error });
+      });
+    }
     this.awayRecords?.afterOnline(link);
     if (!this.watched) this.feedbag.ensureTypingPref(link);
     const self = this.signOnService.self;

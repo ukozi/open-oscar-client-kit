@@ -1,3 +1,4 @@
+import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { COUNTER_DIAL_MS, OFFER_ACCEPT_MS } from '../../src/client/rendezvous.js';
 import { MAX_WAITING_OFFERS, PEER_CANCEL_WAIT_MS } from '../../src/client/transfers.js';
@@ -320,7 +321,9 @@ describe('Send File between two clients', () => {
     await start();
     const id = await alice.client.sendFiles('Bob', [source('notes.txt', content(100))]);
     const offer = await offerAt(bob);
-    await timers.advance(OFFER_ACCEPT_MS - 1);
+    // A skip, then the due timers: in five minutes of probes, one late answer of the server closes the connection.
+    timers.skip(OFFER_ACCEPT_MS - 1);
+    await timers.advance(0);
     expect(states(alice, id)).toEqual(['waiting']);
     await timers.advance(1);
     expect(await ended(alice, id, 'failed')).toMatchObject({ failure: 'timed-out' });
@@ -520,5 +523,60 @@ describe('Send File between two clients', () => {
     await alice.client.cancelTransfer('bob:0000000000000001');
     expect(states(alice, id)).toEqual(['waiting']);
     await expect(alice.client.sendFiles('', [source('notes.txt', content(10))])).rejects.toMatchObject({ info: { kind: 'local', code: 'invalid-screen-name' } });
+  });
+});
+
+describe('a peer route and a local address', () => {
+  it('Bob asks the rule about the relay, dials its route from his local address, and the file arrives', async () => {
+    timers = new ManualTimers();
+    fake = await FakeOscarServer.start({ now: timers.now, timers: timers.api, relay: true });
+    fake.addUser('Alice', 'alicepw1');
+    fake.addUser('Bob', 'bobpw123');
+    alice = await join('Alice', 'alicepw1', {});
+    const sources: string[] = [];
+    const sockets: net.Socket[] = [];
+    // A forwarder in front of the relay: the route leads here.
+    const forwarder = net.createServer((socket) => {
+      sockets.push(socket);
+      sources.push((socket.remoteAddress ?? '').replace(/^::ffff:/, ''));
+      const relay = net.connect({ host: '127.0.0.1', port: fake.relayPort });
+      sockets.push(relay);
+      for (const end of [socket, relay]) end.on('error', () => {});
+      socket.pipe(relay);
+      relay.pipe(socket);
+    });
+    await new Promise<void>((resolve) => forwarder.listen(0, '127.0.0.1', resolve));
+    const asked: unknown[] = [];
+    const routed: unknown[] = [];
+    try {
+      const routedBob = makeClient(fake, {
+        timers,
+        fileTransfer: {
+          allowDial: (address) => {
+            asked.push(address);
+            return true;
+          },
+        },
+        localAddress: '127.0.0.1',
+        peerRoute: (address) => {
+          routed.push(address);
+          return { host: '127.0.0.1', port: (forwarder.address() as net.AddressInfo).port };
+        },
+      });
+      await routedBob.signOn('Bob', 'bobpw123');
+      const data = content(70_001);
+      const id = await alice.client.sendFiles('Bob', [source('notes.txt', data)]);
+      const offer = await offerAt(routedBob);
+      const into = memorySink();
+      await routedBob.client.acceptFileOffer(offer.id, into.sink);
+      await ended(alice, id, 'done');
+      await ended(routedBob, offer.id, 'done');
+      expect(bytesOf(into.files[0])).toEqual(data);
+      const relay = { ip: '127.0.0.1', port: fake.relayPort };
+      expect([asked, routed, sources]).toEqual([[relay], [relay], ['127.0.0.1']]);
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => forwarder.close(resolve));
+    }
   });
 });

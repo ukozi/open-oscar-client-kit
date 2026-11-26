@@ -136,7 +136,7 @@ function rig(over: Partial<TransfersDeps> & { open?: typeof openPeerLink } = {})
     log,
     now: timers.now,
     timers: timers.api,
-    enabled: true,
+    enabled: () => true,
     rendezvous,
     send,
     isBlocked: (name) => one.blocked.has(name.toLowerCase()),
@@ -261,7 +261,7 @@ describe('what the client refuses to offer', () => {
   });
 
   it('with file transfer off, each command is refused and each message is left alone', async () => {
-    const r = rig({ enabled: false });
+    const r = rig({ enabled: () => false });
     expect(() => r.t.sendFiles('Bob', [file])).toThrow(expect.objectContaining(INVALID));
     expect(r.t.handle(proposal())).toBe(false);
     expect(() => r.t.accept(ID, sink)).toThrow(expect.objectContaining(INVALID));

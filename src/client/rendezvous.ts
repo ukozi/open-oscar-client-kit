@@ -28,6 +28,10 @@ export type RendezvousDeps = {
   propose?(body: Uint8Array, refused: () => void): Promise<void>;
   /** Asked before each dial. The service lets the owner choose the rule. */
   allowDial(address: PeerAddress, service: RendezvousService): Promise<boolean>;
+  /** Where the client dials for an address that `allowDial` allowed. The default is the address. */
+  route?(address: PeerAddress): { host: string; port: number };
+  /** The local address that each peer connection binds. The default lets the system choose. */
+  localAddress?: string | undefined;
   /** Opens the connection. Tests replace it. */
   open?: typeof openPeerLink;
 };
@@ -232,14 +236,15 @@ export class Rendezvous {
 
   // The result is null when the offer ended before its turn, and when the connection did not open. It is 'unsent' when `first` did not go out.
   private dial(offer: Offer, address: PeerAddress, first: Uint8Array | null): Promise<PeerLink | 'unsent' | null> {
-    const { log, timers } = this.deps;
+    const { log, timers, route, localAddress } = this.deps;
     const open = this.deps.open ?? openPeerLink;
     const turn = this.dials.then(async () => {
       if (!this.live(offer)) return null;
       if (first && !(await this.say(offer, first))) return 'unsent';
       if (!this.live(offer)) return null;
       try {
-        return await open({ host: address.ip, port: address.port, log, timers });
+        const to = route ? route(address) : { host: address.ip, port: address.port };
+        return await open({ host: to.host, port: to.port, log, timers, localAddress });
       } catch (error) {
         log.info('a rendezvous connection did not open', { service: offer.service, error: error instanceof Error ? error.name : typeof error });
         return null;

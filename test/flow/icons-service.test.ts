@@ -108,6 +108,19 @@ describe('icons over an icon service connection', () => {
     ]);
   });
 
+  it('announces the negotiated OService version on an icon connection', async () => {
+    h = makeClient(fake, { timers, random: () => 0, iconStore: memoryIconStore(), oserviceVersion: 4 });
+    fake.peer('Bob').setIcon(PNG);
+    await signOn('bob');
+    await shows('bob', HEX);
+    const versions = onBart().find(is(0x01, 0x17));
+    expect(u16Groups(versions?.body ?? new Uint8Array(0), 2)).toEqual([
+      [0x0001, 4],
+      [0x0010, 1],
+    ]);
+    expect(fake.oserviceVersionOf('Alice', 0)).toBe(4);
+  });
+
   it('opens one icon connection for many requests', async () => {
     fake.peer('Bob').setIcon(PNG);
     fake.peer('Carol').setIcon(P2);

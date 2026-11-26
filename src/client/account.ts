@@ -21,7 +21,7 @@ import type { Logger, TimerApi } from '../wire/types.js';
 import type { CommandError } from '../model/session.js';
 import type { BosLink } from './bos-link.js';
 import { OscarError } from './errors.js';
-import { serviceResolver } from './service.js';
+import { serviceResolver, serviceVersions } from './service.js';
 import { connectionTls } from './connect-options.js';
 import type { ServerAddress } from './sign-on.js';
 
@@ -161,9 +161,9 @@ export class Account {
         at('versions');
         current = OSERVICE_CLIENT_VERSIONS;
         await within(link.paced(FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS));
-        await within(conn.request(FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS, encodeClientVersions(FAMILIES), ADMIN_REQUEST_TIMEOUT_MS));
+        await within(conn.request(FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS, encodeClientVersions(FAMILIES, serviceVersions(link)), ADMIN_REQUEST_TIMEOUT_MS));
         await within(link.paced(FAMILY_OSERVICE, OSERVICE_CLIENT_ONLINE));
-        conn.send(FAMILY_OSERVICE, OSERVICE_CLIENT_ONLINE, encodeClientOnline(FAMILIES));
+        conn.send(FAMILY_OSERVICE, OSERVICE_CLIENT_ONLINE, encodeClientOnline(FAMILIES, serviceVersions(link)));
         at('request');
         family = FAMILY_ADMIN;
         current = subtype;

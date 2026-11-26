@@ -124,9 +124,17 @@ class SocketLink implements PeerLink {
   }
 }
 
-export function openPeerLink(o: { host: string; port: number; log: Logger; timers: TimerApi; connectTimeoutMs?: number }): Promise<PeerLink> {
+/** `localAddress` is the local address that the connection binds. The default lets the system choose. */
+export function openPeerLink(o: {
+  host: string;
+  port: number;
+  log: Logger;
+  timers: TimerApi;
+  connectTimeoutMs?: number;
+  localAddress?: string | undefined;
+}): Promise<PeerLink> {
   return new Promise((resolve, reject) => {
-    const socket = net.connect({ host: o.host, port: o.port });
+    const socket = net.connect({ host: o.host, port: o.port, localAddress: o.localAddress });
     socket.setNoDelay(true);
     const failed = (reason: string): void => {
       o.timers.clearTimeout(timer);

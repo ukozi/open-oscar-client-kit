@@ -72,7 +72,9 @@ async function* fromSource(file: OutgoingFile): AsyncIterable<Uint8Array> {
   }
 }
 
+// With a given checksum, the file is not read here. The check after the send finds a wrong checksum.
 async function sourceChecksum(file: OutgoingFile, signal: OftSignal): Promise<number> {
+  if (typeof file.checksum === 'number') return file.checksum;
   let check = OFT_CHECKSUM_START;
   let count = 0;
   for await (const chunk of fromSource(file)) {

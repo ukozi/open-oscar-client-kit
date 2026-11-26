@@ -29,6 +29,7 @@ import type {
   ResumeState,
   SendImOptions,
   SentIm,
+  ServiceSwitch,
   Siblings,
   SignOnOptions,
   StoredTicketSource,
@@ -128,6 +129,7 @@ export const getFileOptions: OscarClientOptions = {
   getFile: { allowDial: (to) => to.port === address.port, maxListingBytes: 4096, maxEntries: 100, maxServing: 2 },
 };
 export const buddyIconOptions: OscarClientOptions = { buddyIcon: true };
+export const someServices: ServiceSwitch = { fileTransfer: true, getFile: false };
 export const sharedEntry: SharedEntry = { path: ['a.txt'], folder: false, bytes: 3, modifiedAt: 0 };
 export const sharedSource: SharedSource = { list: async (folder) => (folder.length === 0 ? [sharedEntry] : null), open: async () => null };
 export const getFileEnd: GetFileEnd = 'peer-closed';
@@ -248,6 +250,7 @@ export type ClientTypes = [
   RendezvousEnd,
   RendezvousOutcome,
   ResumeState,
+  ServiceSwitch,
   Siblings,
   SignOnOptions,
   StoredTicketSource,

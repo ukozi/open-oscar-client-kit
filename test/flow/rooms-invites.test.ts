@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OscarError } from '../../src/client/errors.js';
-import { INVITE_TEXT_MAX, MAX_PENDING_INVITES, ROOM_CLOSE_SETTLE_MS, Rooms } from '../../src/client/rooms.js';
+import { INVITED_TTL_MS, INVITE_TEXT_MAX, MAX_INVITED, MAX_PENDING_INVITES, ROOM_CLOSE_SETTLE_MS, Rooms } from '../../src/client/rooms.js';
 import { ByteReader, ByteWriter } from '../../src/wire/bytes.js';
 import { CAP_CHAT, SERVICE_TLV_ROOM_INFO } from '../../src/wire/constants.js';
 import { encodeFileProposal, encodeRendezvousAccept, encodeRendezvousCancel } from '../../src/wire/rendezvous.js';
@@ -419,6 +419,42 @@ describe('room invites', () => {
     expect(h.declines).toEqual([]);
     bob.declineInvite('Alice', cookie);
     await waitFor(() => h.declines.length === 1, 'the decline of Bob');
+    expect(h.declines).toEqual([{ roomId: id, by: 'Bob' }]);
+  });
+
+  it(`forgets an invitation it sent ${INVITED_TTL_MS} ms after it sent it`, async () => {
+    await h.client.inviteToRoom(id, 'Bob');
+    await h.client.inviteToRoom(id, 'Bob');
+    const [first, second] = bob.invites().map((invite) => invite.cookie);
+    if (first === undefined || second === undefined) throw new Error('the invitations did not reach Bob');
+    // A skip, not an advance: an hour of keepalive timers is not part of this test.
+    timers.skip(INVITED_TTL_MS - 1);
+    bob.declineInvite('Alice', first);
+    await waitFor(() => h.declines.length === 1, 'the decline before the hour');
+    timers.skip(1);
+    bob.declineInvite('Alice', second);
+    await readUpTo(bob, 'marker');
+    expect(h.declines).toEqual([{ roomId: id, by: 'Bob' }]);
+    expect(h.client.state).toBe('online');
+  });
+
+  it(`keeps at most ${MAX_INVITED} invitations it sent, and forgets the oldest first`, async () => {
+    let sent = false;
+    const sending = (async () => {
+      for (let n = 0; n <= MAX_INVITED; n++) await h.client.inviteToRoom(id, 'Bob');
+    })().finally(() => {
+      sent = true;
+    });
+    // The rate class of the BOS connection paces the invitations.
+    while (!sent) await timers.advance(1_000);
+    await sending;
+    expect(bob.invites()).toHaveLength(MAX_INVITED + 1);
+    const [oldest, next] = bob.invites().map((invite) => invite.cookie);
+    if (oldest === undefined || next === undefined) throw new Error('the invitations did not reach Bob');
+    bob.declineInvite('Alice', oldest);
+    bob.declineInvite('Alice', next);
+    await waitFor(() => h.declines.length > 0, 'the decline of the second invitation');
+    await readUpTo(bob, 'marker');
     expect(h.declines).toEqual([{ roomId: id, by: 'Bob' }]);
   });
 

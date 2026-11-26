@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import net from 'node:net';
+import { afterEach, describe, expect, it } from 'vitest';
 import { BosLink } from '../../../src/client/bos-link.js';
 import { clientIdFor } from '../../../src/client/client-id.js';
 import type { OscarError } from '../../../src/client/errors.js';
@@ -6,12 +7,16 @@ import { SignOnError } from '../../../src/client/errors.js';
 import { connectionTls, redirectMode } from '../../../src/client/connect-options.js';
 import { INVISIBLE_TIMEOUT_MS, LOGIN_COOKIE_NAME_BUDGET, SignOn, classifyBosClose, loginFailure, parseSelfInfo } from '../../../src/client/sign-on.js';
 import type { Restore } from '../../../src/client/sign-on.js';
-import { FlapDecoder } from '../../../src/wire/flap.js';
+import { bucpTicketSource, storedTicketSource } from '../../../src/client/tickets.js';
+import { FLAP_SIGNON } from '../../../src/wire/constants.js';
+import { FlapDecoder, encodeFlap, encodeSignonPayload } from '../../../src/wire/flap.js';
 import { decodeUserInfo, encodeUserInfo } from '../../../src/wire/snac.js';
 import { decodeTlvs, tlv } from '../../../src/wire/tlv.js';
 import { MAX_SCREEN_NAME_BYTES } from '../../../src/model/screen-name.js';
 import type { SelfInfo } from '../../../src/model/session.js';
-import { ManualTimers, captureLog } from '../../fake/oscar-client.js';
+import { makeClient, stopAllClients } from '../../fake/harness.js';
+import { ManualTimers, captureLog, waitFor } from '../../fake/oscar-client.js';
+import { FakeOscarServer } from '../../fake/oscar-server.js';
 import { StubConn } from '../../fake/stub-conn.js';
 import type { SentSnac } from '../../fake/stub-conn.js';
 import { bytesOf, loadVectors } from '../../support/vectors.js';
@@ -416,5 +421,62 @@ describe('the transport of a server connection', () => {
     expect((error as SignOnError).failure).toEqual({ kind: 'unreachable' });
     expect((error as SignOnError).evidence).toEqual({ kind: 'unreachable' });
     expect(((error as SignOnError).cause as { code?: unknown }).code).toBe('ENOENT');
+  });
+});
+
+// The machine does not hold 192.0.2.1, so a connection that binds it fails.
+describe('the local address', () => {
+  let fake: FakeOscarServer | null = null;
+  let listener: net.Server | null = null;
+  const sockets: net.Socket[] = [];
+
+  afterEach(async () => {
+    for (const socket of sockets.splice(0)) socket.destroy();
+    await stopAllClients();
+    await fake?.stop();
+    fake = null;
+    const open = listener;
+    listener = null;
+    if (open) await new Promise((resolve) => open.close(resolve));
+  });
+
+  it('the BOS connection binds localAddress', async () => {
+    const sources: string[] = [];
+    const server = net.createServer((socket) => {
+      sockets.push(socket);
+      sources.push((socket.remoteAddress ?? '').replace(/^::ffff:/, ''));
+      socket.write(encodeFlap(FLAP_SIGNON, 1, encodeSignonPayload()));
+    });
+    listener = server;
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const ticket = { host: '127.0.0.1', port: (server.address() as net.AddressInfo).port, cookie: Uint8Array.of(1) };
+    const timers = new ManualTimers();
+    const deps = { log: captureLog().log, now: timers.now, timers: timers.api, budget: { take: async () => {} } };
+    const error = await new SignOn({ ...deps, localAddress: '192.0.2.1' }).openBos(ticket, () => {}).catch((e: unknown) => e);
+    expect([error instanceof SignOnError, (error as SignOnError).failure]).toEqual([true, { kind: 'unreachable' }]);
+    const conn = await new SignOn({ ...deps, localAddress: '127.0.0.1' }).openBos(ticket, () => {});
+    await waitFor(() => sources.length === 1, 'the connection');
+    expect(sources).toEqual(['127.0.0.1']);
+    conn.close();
+  });
+
+  it('a client binds localAddress for the login and for BOS', async () => {
+    const timers = new ManualTimers();
+    const server = await FakeOscarServer.start({ now: timers.now });
+    fake = server;
+    server.addUser('Alice', 'alicepw1');
+    const here = { host: '127.0.0.1', port: server.port };
+    const failed = (run: Promise<unknown>) => run.then(() => 'online', (e: unknown) => (e instanceof SignOnError ? e.failure : e));
+
+    expect(await failed(makeClient(server, { timers, localAddress: '192.0.2.1' }).signOn())).toEqual({ kind: 'unreachable' });
+    expect(server.authSignons).toHaveLength(0);
+
+    const deps = { log: captureLog().log, now: timers.now, timers: timers.api, budget: { take: async () => {} } };
+    const issued = await bucpTicketSource({ ...deps, credentials: { screenName: 'Alice', password: 'alicepw1' }, server: here })
+      .ticket({ reconnect: false, track: () => {} });
+    const bound = makeClient(server, { timers, localAddress: '192.0.2.1' });
+    expect(await failed(bound.client.signOnWith(storedTicketSource(issued), here))).toEqual({ kind: 'unreachable' });
+
+    expect(await makeClient(server, { timers, localAddress: '127.0.0.1' }).signOn()).toBe('online');
   });
 });

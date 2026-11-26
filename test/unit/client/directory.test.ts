@@ -82,12 +82,13 @@ function stubConnection(id: number, events: string[], answer: Answer) {
   return { conn, calls, drop, closes: () => closes };
 }
 
-function harness(opts: { bos?: Answer; odir?: Answer } = {}) {
+function harness(opts: { bos?: Answer; odir?: Answer; oserviceVersion?: number } = {}) {
   const events: string[] = [];
   const bosCalls: Call[] = [];
   const grants: { host: string; port: number; cookie: Uint8Array }[] = [];
   const conns: ReturnType<typeof stubConnection>[] = [];
   const link = {
+    oserviceVersion: opts.oserviceVersion ?? 1,
     paced(family: number, subtype: number): Promise<void> {
       events.push(`paced:${key(family, subtype)}`);
       return Promise.resolve();
@@ -158,6 +159,12 @@ describe('Directory', () => {
     expect(stub?.calls[1]?.body).toEqual(encodeClientOnline([0x0001, 0x000f]));
     expect(stub?.calls[2]?.body).toEqual(encodeNameSearch('Ada', ''));
     expect(stub?.calls[2]?.timeoutMs).toBe(DIRECTORY_REQUEST_TIMEOUT_MS);
+  });
+
+  it('announces the version of its link', async () => {
+    const { directory, link, conns } = harness({ oserviceVersion: 4 });
+    await directory.searchByName(link, server, 'Ada', '');
+    expect(conns[0]?.calls[0]?.body).toEqual(encodeClientVersions([0x0001, 0x000f], (f) => (f === 1 ? 4 : 1)));
   });
 
   it('shares the connection between two searches, at once and later', async () => {

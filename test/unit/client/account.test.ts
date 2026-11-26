@@ -95,6 +95,7 @@ function harness(opts: Options = {}) {
   const renamed: string[] = [];
   const limited = opts.limited ?? (() => false);
   const link = {
+    oserviceVersion: 1,
     paced(family: number, subtype: number): Promise<void> {
       events.push(`paced:${key(family, subtype)}`);
       return Promise.resolve();

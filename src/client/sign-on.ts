@@ -82,12 +82,12 @@ export type SignOnDeps = {
   clientId?: string;
   /** The capabilities written to the Locate profile. The default is `[CAP_UTF8_MESSAGES, CAP_CHAT]`. */
   capabilities?: readonly Uint8Array[];
-  /** Adds `CAP_SEND_FILE` to the capabilities written, one time. The default adds nothing. */
-  sendFile?: boolean;
-  /** Adds `CAP_DIRECT_IM` to the capabilities written, one time. The default adds nothing. */
-  directIm?: boolean;
-  /** Adds `CAP_GET_FILE` to the capabilities written, one time. The default adds nothing. */
-  getFile?: boolean;
+  /** Adds `CAP_SEND_FILE` to the capabilities written, one time. A function is read at each write. The default adds nothing. */
+  sendFile?: boolean | (() => boolean);
+  /** Adds `CAP_DIRECT_IM` to the capabilities written, one time. A function is read at each write. The default adds nothing. */
+  directIm?: boolean | (() => boolean);
+  /** Adds `CAP_GET_FILE` to the capabilities written, one time. A function is read at each write. The default adds nothing. */
+  getFile?: boolean | (() => boolean);
   /** Adds `CAP_BUDDY_ICON` to the capabilities written, one time. The default adds nothing. */
   buddyIcon?: boolean;
   /** The OService version asked for on BOS. The server can grant less. The default is 1. */
@@ -96,7 +96,7 @@ export type SignOnDeps = {
   tokenTtlSeconds?: number;
   /** Where the BOS connection goes, whatever host the login reply names. The default follows a routable advertised host. */
   pinRedirects?: ServerAddress;
-  /** The local address the login connection binds, so the server sees that source. BOS and service connections never bind. The default lets the system choose. */
+  /** The local address that the login and BOS connections bind, so the server sees that source. Service connections do not bind. The default lets the system choose. */
   localAddress?: string;
   /** Opens the login, BOS and service connections with TLS. `caFile` names a PEM file of the certificates to trust. The default is plain TCP. */
   tls?: { caFile?: string };
@@ -124,6 +124,9 @@ const DEFAULT_AWAY_AND_PROFILE_BYTES = 1000;
 export const INVISIBLE_TIMEOUT_MS = 15_000;
 
 type InvisibleWait = { on: boolean; armed: boolean; settle(error?: Error): void };
+
+const isOn = (on: boolean | (() => boolean) | undefined): boolean => (typeof on === 'function' ? on() : on === true);
+const capabilityKey = (caps: readonly Uint8Array[]): string => caps.map(toHex).join();
 
 export function parseSelfInfo(body: Uint8Array): SelfInfo {
   const { info } = decodeUserInfo(body, 0);
@@ -187,6 +190,7 @@ export class SignOn {
   private idle = false;
   private granted = 1;
   private latest: { body: Uint8Array; snapshot: UserInfoSnapshot } | null = null;
+  private written: string | null = null;
 
   constructor(private readonly deps: SignOnDeps) {}
 
@@ -232,6 +236,7 @@ export class SignOn {
   dropped(): void {
     this.granted = 1;
     this.latest = null;
+    this.written = null;
     for (const wait of [...this.invisibleWaits]) wait.settle(new OscarError({ kind: 'connection-lost' }));
   }
 
@@ -239,12 +244,28 @@ export class SignOn {
     return this.readUserInfo(await ask(link, FAMILY_OSERVICE, OSERVICE_USER_INFO_QUERY, OSERVICE_USER_INFO_UPDATE));
   }
 
+  /** Writes the capabilities again, and no profile or away, on the online link. */
+  async writeCapabilities(link: BosLink): Promise<void> {
+    await link.send(FAMILY_LOCATE, LOCATE_SET_INFO, this.locateInfo({}));
+  }
+
+  /** True when the capabilities differ from the last ones written. */
+  get capabilitiesChanged(): boolean {
+    return this.written !== null && this.written !== capabilityKey(this.capabilities());
+  }
+
+  private locateInfo(info: { profile?: string; away?: string }): Uint8Array {
+    const capabilities = this.capabilities();
+    this.written = capabilityKey(capabilities);
+    return encodeLocateInfo({ capabilities, ...info });
+  }
+
   private capabilities(): readonly Uint8Array[] {
     const caps = this.deps.capabilities ?? DEFAULT_CAPABILITIES;
     const held = new Set(caps.map(toHex));
     const services = [
-      ...(this.deps.sendFile === true ? [CAP_SEND_FILE] : []), ...(this.deps.directIm === true ? [CAP_DIRECT_IM] : []),
-      ...(this.deps.getFile === true ? [CAP_GET_FILE] : []), ...(this.deps.buddyIcon === true ? [CAP_BUDDY_ICON] : []),
+      ...(isOn(this.deps.sendFile) ? [CAP_SEND_FILE] : []), ...(isOn(this.deps.directIm) ? [CAP_DIRECT_IM] : []),
+      ...(isOn(this.deps.getFile) ? [CAP_GET_FILE] : []), ...(this.deps.buddyIcon === true ? [CAP_BUDDY_ICON] : []),
     ];
     const added = services.filter((cap) => !held.has(toHex(cap)));
     return added.length === 0 ? caps : [...caps, ...added];
@@ -329,6 +350,7 @@ export class SignOn {
     const hostVersions = await ask(link, FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS, OSERVICE_HOST_VERSIONS, encodeClientVersions(families, versionOf));
     const oserviceVersion = Math.min(asked, decodeHostVersions(hostVersions).get(FAMILY_OSERVICE) ?? 1);
     this.granted = oserviceVersion;
+    link.oserviceVersion = oserviceVersion;
 
     link.seedRates(decodeRateParamsReply(await ask(link, FAMILY_OSERVICE, OSERVICE_RATE_PARAMS_QUERY, OSERVICE_RATE_PARAMS_REPLY), oserviceVersion));
     await link.send(FAMILY_OSERVICE, OSERVICE_RATE_PARAMS_SUB_ADD, encodeClassIds(link.rateClassIds()));
@@ -341,7 +363,7 @@ export class SignOn {
     await link.send(
       FAMILY_LOCATE,
       LOCATE_SET_INFO,
-      encodeLocateInfo({ capabilities: this.capabilities(), profile: fits ? locateText(profile) : '', ...away }),
+      this.locateInfo({ profile: fits ? locateText(profile) : '', ...away }),
     );
 
     const imBytes = imBytesOf(await ask(link, FAMILY_ICBM, ICBM_PARAM_QUERY, ICBM_PARAM_REPLY));
@@ -388,7 +410,7 @@ export class SignOn {
   }
 
   openBos(ticket: BosTicket, track: (conn: OscarConnection) => void): Promise<OscarConnection> {
-    return this.open({ host: ticket.host, port: ticket.port, cookie: ticket.cookie, label: 'bos' }, track);
+    return this.open({ host: ticket.host, port: ticket.port, cookie: ticket.cookie, label: 'bos', localAddress: this.deps.localAddress }, track);
   }
 
   private async open(

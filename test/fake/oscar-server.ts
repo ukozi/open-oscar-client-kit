@@ -88,6 +88,7 @@ import {
 import { LOCATE_MIME } from '../../src/wire/locate.js';
 import { FAMILY_ODIR } from '../../src/wire/odir.js';
 import type { DirListing, KeywordGroup } from '../../src/wire/odir.js';
+import { decodeHostVersions } from '../../src/wire/oservice.js';
 import { checkRate } from '../../src/wire/rate.js';
 import type { RateCheck, RateClassParams, RateStatus } from '../../src/wire/rate.js';
 import { decodeSnac, encodeSnac, encodeUserInfo } from '../../src/wire/snac.js';
@@ -2473,6 +2474,13 @@ export class FakeOscarServer {
     else this.onRoomSnac(conn, snac);
   }
 
+  // foodgroup/oservice.go ClientVersions: the pairs replace the versions of the instance. A service connection has the instance of its BOS connection.
+  // A food group that the pairs leave out goes to 0.
+  private replaceVersions(instance: Instance, body: Uint8Array): void {
+    const asked = decodeHostVersions(body).get(FAMILY_OSERVICE) ?? 0;
+    instance.oserviceVersion = Math.min(asked, this.opts.oserviceMax ?? OSERVICE_MULTI_INSTANCE_VERSION);
+  }
+
   private onAdminSnac(conn: Conn, snac: Snac): void {
     const account = this.accounts.get(conn.name);
     const bos = this.adminConns.get(conn);
@@ -2480,6 +2488,7 @@ export class FakeOscarServer {
     if (!account || !bos || !instance) return;
     switch (snacKey(snac.family, snac.subtype)) {
       case 0x0001_0017:
+        this.replaceVersions(instance, snac.body);
         conn.snac(1, 0x18, snac.requestId, snac.body);
         return;
       case 0x0001_000e:
@@ -2506,6 +2515,7 @@ export class FakeOscarServer {
     if (!account || !instance) return;
     switch (snacKey(snac.family, snac.subtype)) {
       case 0x0001_0017:
+        this.replaceVersions(instance, snac.body);
         conn.snac(1, 0x18, snac.requestId, snac.body);
         return;
       case 0x0001_000e:
@@ -2630,6 +2640,7 @@ export class FakeOscarServer {
     if (!account || !instance) return;
     switch (snacKey(snac.family, snac.subtype)) {
       case 0x0001_0017:
+        this.replaceVersions(instance, snac.body);
         conn.snac(1, 0x18, snac.requestId, snac.body);
         return;
       case 0x0001_000e:

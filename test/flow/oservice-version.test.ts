@@ -3,7 +3,7 @@ import { BART_FOOD_GROUP, BOS_FOOD_GROUPS } from '../../src/client/sign-on.js';
 import { concatBytes, toHex } from '../../src/wire/bytes.js';
 import { CAP_CHAT, CAP_MOBILE_CLIENT, CAP_UTF8_MESSAGES } from '../../src/wire/constants.js';
 import type { FeedbagItem } from '../../src/wire/feedbag.js';
-import { decodeHostVersions, encodeClientOnline, encodeClientVersions } from '../../src/wire/oservice.js';
+import { decodeHostVersions, decodeUserInfoUpdate, encodeClientOnline, encodeClientVersions } from '../../src/wire/oservice.js';
 import { decodeRateParamChange, decodeRateParamsReply } from '../../src/wire/rate.js';
 import { decodeSnac } from '../../src/wire/snac.js';
 import type { Snac } from '../../src/wire/snac.js';
@@ -90,6 +90,30 @@ describe('OService version of a client', () => {
     expect([h.client.oserviceVersion, fake.oserviceVersionOf('alice', 0)]).toEqual([1, 1]);
   });
 
+  it('announces the negotiated OService version on a directory connection, and the list of instances stays', async () => {
+    await start();
+    h = makeClient(fake, { timers, oserviceVersion: 4, capabilities: PHONE_CAPS });
+    await h.signOn();
+    await h.client.directoryKeywords();
+    const odir = fake.snacsFrom('alice').filter((s) => s.conn === 'odir' && s.family === 1 && (s.subtype === 0x17 || s.subtype === 0x02));
+    expect(odir.map((s) => [s.subtype, toHex(s.body).slice(0, 8)])).toEqual([
+      [0x17, '00010004'],
+      [0x02, '00010004'],
+    ]);
+    expect(fake.oserviceVersionOf('alice', 0)).toBe(4);
+    const info = await h.client.queryUserInfo();
+    expect([info.instances.length, info.selfMatches]).toEqual([1, 1]);
+  });
+
+  it('announces version 1 on a directory connection when the server grants no more', async () => {
+    await start({ oserviceMax: 1 });
+    h = makeClient(fake, { timers, oserviceVersion: 4, capabilities: PHONE_CAPS });
+    await h.signOn();
+    await h.client.directoryKeywords();
+    const versions = fake.snacsFrom('alice').find((s) => s.conn === 'odir' && s.family === 1 && s.subtype === 0x17);
+    expect(toHex(bodyOf(versions)).slice(0, 8)).toBe('00010001');
+  });
+
   it('reports the version only while online, and negotiates it again after a drop', async () => {
     await start();
     h = makeClient(fake, { timers, random: () => 0, oserviceVersion: 4 });
@@ -140,6 +164,18 @@ async function bos(oservice: number): Promise<{ client: RawClient; versions: Map
 }
 
 describe('the test server and the OService version', () => {
+  it('replaces the versions of an instance when a service connection of it announces versions', async () => {
+    await start();
+    const { client } = await bos(4);
+    expect(decodeUserInfoUpdate((await request(client, 1, 0x0e)).body)).toHaveLength(2);
+    const service = await RawClient.service(fake.port, await client.requestService(0x000f));
+    raw.push(service);
+    await service.nextSnac();
+    service.snac(1, 0x17, marker++, encodeClientVersions([0x0001, 0x000f]));
+    await waitFor(() => fake.oserviceVersionOf('alice', 0) === 1, 'the instance at version 1');
+    expect(decodeUserInfoUpdate((await request(client, 1, 0x0e)).body)).toHaveLength(1);
+  });
+
   it('grants the lower of the version asked for and its maximum, to each connection of an account', async () => {
     await start({ oserviceMax: 3 });
     const a = await bos(4);

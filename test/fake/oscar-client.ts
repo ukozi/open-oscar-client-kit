@@ -46,6 +46,11 @@ export class ManualTimers {
     return [...this.queue.values()].map((e) => e.at - this.t).sort((a, b) => a - b);
   }
 
+  /** Moves the clock forward and runs no timer. A timer that is due runs at the next advance. */
+  skip(ms: number): void {
+    this.t += ms;
+  }
+
   async advance(ms: number): Promise<void> {
     const end = this.t + ms;
     for (;;) {

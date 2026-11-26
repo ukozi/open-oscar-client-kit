@@ -32,7 +32,7 @@ import type { Snac } from '../wire/snac.js';
 import type { Logger, TimerApi } from '../wire/types.js';
 import type { BosLink } from './bos-link.js';
 import { OscarError } from './errors.js';
-import { serviceResolver } from './service.js';
+import { serviceResolver, serviceVersions } from './service.js';
 import { connectionTls } from './connect-options.js';
 import type { ServerAddress } from './sign-on.js';
 
@@ -251,9 +251,9 @@ export class Directory {
     const conn = await (this.deps.open ? this.deps.open(where) : openConnection({ ...where, ...connectionTls(tls), label: 'odir', log, now, timers, ...limits }));
     try {
       await link.paced(FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS);
-      await conn.request(FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS, encodeClientVersions(FAMILIES), DIRECTORY_REQUEST_TIMEOUT_MS);
+      await conn.request(FAMILY_OSERVICE, OSERVICE_CLIENT_VERSIONS, encodeClientVersions(FAMILIES, serviceVersions(link)), DIRECTORY_REQUEST_TIMEOUT_MS);
       await link.paced(FAMILY_OSERVICE, OSERVICE_CLIENT_ONLINE);
-      conn.send(FAMILY_OSERVICE, OSERVICE_CLIENT_ONLINE, encodeClientOnline(FAMILIES));
+      conn.send(FAMILY_OSERVICE, OSERVICE_CLIENT_ONLINE, encodeClientOnline(FAMILIES, serviceVersions(link)));
     } catch (error) {
       conn.close();
       throw error;

@@ -449,7 +449,8 @@ describe('warn', () => {
     expect(await h.client.warn('Bob')).toEqual({ level: 300 });
     expect(h.client.canWarn('Bob')).toBe(false);
 
-    await timers.advance(3_600_001);
+    // A skip, not an advance: in an hour of probes, one late answer of the server closes the connection.
+    timers.skip(3_600_001);
     expect(h.client.canWarn('Bob')).toBe(false);
     bob.sendIm('Alice', 'again');
     await ims(8);

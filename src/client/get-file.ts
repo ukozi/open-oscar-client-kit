@@ -23,8 +23,8 @@ export type GetFileDeps = {
   log: Logger;
   now: () => number;
   timers: TimerApi;
-  /** When false, the part ignores each message and refuses each command. */
-  enabled: boolean;
+  /** Read at each use. While false, the part ignores each offer and refuses each new browse or share. A browse or share that runs goes on. */
+  enabled: () => boolean;
   /** The offers of the session. Its owner resets it. */
   rendezvous: Rendezvous;
   /** Sends one ICBM 0x04/0x06 body on the BOS link. It rejects when the session is not online. */
@@ -121,7 +121,7 @@ export class GetFile {
 
   /** Asks for the files of a peer and gives the id of the browse. A peer with a browse that is live gets no second offer: the result is the id of that browse. */
   browse(screenName: string): string {
-    if (!this.deps.enabled) throw invalid();
+    if (!this.deps.enabled()) throw invalid();
     const ident = normalizeScreenName(screenName);
     for (const live of this.browses.values()) if (live.ident === ident) return live.id;
     const cookie = this.freshCookie(ident);
@@ -191,7 +191,7 @@ export class GetFile {
    * A source that is not the source in use closes each connection of a requester. The same source changes nothing.
    */
   share(source: SharedSource | null): void {
-    if (!this.deps.enabled) throw invalid();
+    if (!this.deps.enabled()) throw invalid();
     if (source === this.source) return;
     this.source = source;
     for (const s of [...this.shares.values()]) {
@@ -211,7 +211,7 @@ export class GetFile {
   allow(requestId: string): void {
     const s = this.shares.get(requestId);
     const source = this.source;
-    if (!this.deps.enabled || s?.state !== 'asked' || !source) throw invalid();
+    if (!this.deps.enabled() || s?.state !== 'asked' || !source) throw invalid();
     this.unarm(s);
     if (this.serving() >= this.deps.maxServing) {
       this.deps.log.warn('sent a cancel for a get file request past the limit of requesters');
@@ -247,19 +247,21 @@ export class GetFile {
 
   /** True for a message of the Get File service and for the client error of a peer about one. */
   handle(snac: Snac): boolean {
-    if (!this.deps.enabled || snac.family !== FAMILY_ICBM) return false;
+    const idle = this.browses.size === 0 && this.shares.size === 0;
+    if (snac.family !== FAMILY_ICBM || (!this.deps.enabled() && idle)) return false;
     if (snac.subtype === ICBM_CLIENT_ERR) return this.refused(snac.body);
     if (snac.subtype !== ICBM_MSG_TO_CLIENT) return false;
     const capability = rendezvousCapability(snac.body);
     if (!capability || serviceOf(capability) !== 'get-file') return false;
     const message = parseRendezvous(snac.body);
+    const id = message ? `${message.from}:${hex(message.cookie)}` : '';
+    const b = this.browses.get(id);
+    const s = this.shares.get(id);
+    if (!b && !s && !this.deps.enabled()) return false;
     if (!message) {
       this.deps.log.debug('ignored a get file message of an unknown type');
       return true;
     }
-    const id = `${message.from}:${hex(message.cookie)}`;
-    const b = this.browses.get(id);
-    const s = this.shares.get(id);
     if (b) this.heard(b, message);
     else if (s) this.asked(s, message);
     else if (message.type === 'propose') this.proposed(message, getFileProposalNumber(snac.body));

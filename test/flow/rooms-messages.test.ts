@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OscarError } from '../../src/client/errors.js';
 import { isRoomRoll, roomFailureReason } from '../../src/client/rooms.js';
-import { CHAT_MSG_TLV_ENCODING, CHAT_TLV_MESSAGE, CHAT_TLV_PUBLIC, CHAT_TLV_REFLECT, CHAT_TLV_WHISPER_TO } from '../../src/wire/constants.js';
+import { CHAT_MSG_TLV_ENCODING, CHAT_TLV_MESSAGE, CHAT_TLV_PUBLIC, CHAT_TLV_REFLECT, CHAT_TLV_WHISPER_TO, PROBE_TIMEOUT_MS } from '../../src/wire/constants.js';
 import { decodeTlvs, findTlv } from '../../src/wire/tlv.js';
 import type { Tlv } from '../../src/wire/tlv.js';
 import type { RoomId } from '../../src/model/room.js';
@@ -232,7 +232,10 @@ describe('room messages', () => {
     limitSilently();
     const one = track(say('one'));
     await timers.advance(10_000);
-    await timers.advance(120_000);
+    // The probes go at 80 s. Their answers come in real time, thus the clock waits for them before their deadline.
+    await timers.advance(80_000);
+    await waitFor(() => !timers.pending().includes(PROBE_TIMEOUT_MS), 'the answers to the probes');
+    await timers.advance(40_000);
     await written(2);
     const events = roomEvents().length;
     expect(one.done).toBe(false);

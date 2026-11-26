@@ -1,6 +1,7 @@
 import type { CloseInfo } from '../wire/connection.js';
 import {
   FAMILY_OSERVICE,
+  FOOD_GROUP_VERSION,
   OSERVICE_RATE_PARAM_CHANGE,
   OSERVICE_USER_INFO_QUERY,
   RATE_CODE_ALERT,
@@ -64,6 +65,8 @@ export class BosLink {
   private rates: RateParamsReply | null = null;
   private heardAt: number | null = null;
   private exempt = false;
+  /** The OService version that this connection negotiated. It is 1 until the sign-on sets it. */
+  oserviceVersion = FOOD_GROUP_VERSION;
 
   constructor(
     private readonly conn: BosConn,

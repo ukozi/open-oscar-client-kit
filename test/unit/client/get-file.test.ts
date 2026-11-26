@@ -137,7 +137,7 @@ function rig(over: Partial<GetFileDeps> = {}): Rig {
     log: logs.log,
     now: timers.now,
     timers: timers.api,
-    enabled: true,
+    enabled: () => true,
     rendezvous,
     send,
     isBlocked: () => false,
@@ -230,13 +230,48 @@ function memorySink(): { sink: FileSink; begun: number; aborted: number; finishe
 
 describe('the Get File part', () => {
   it('a client without getFile ignores a Get File proposal and sends nothing back', async () => {
-    const r = rig({ enabled: false });
+    const r = rig({ enabled: () => false });
     expect(r.g.handle(proposal(1))).toBe(false);
     expect(r.g.handle(clientError('Bob'))).toBe(false);
     await tick();
     expect(r.sent).toEqual([]);
     expect(() => r.g.browse('Bob')).toThrowError(expect.objectContaining(INVALID));
     expect(r.browses).toEqual([]);
+  });
+
+  it('a browse that runs goes on when Get File turns off, and a new proposal is left alone', async () => {
+    let on = true;
+    const r = rig({ enabled: () => on });
+    const id = r.g.browse('Bob');
+    await tick();
+    on = false;
+    expect(r.g.handle(proposal(2))).toBe(true);
+    await tick();
+    expect(r.opened).toBe(1);
+    const listing = encodeListing(ROOT);
+    r.link.feed(encodeOftHeader(listingHeader(COOKIE, listing, MINUTE)));
+    r.link.feed(listing.bytes);
+    await waitFor(() => r.listings.length === 1, 'the listing');
+    expect(r.listings[0]?.browseId).toBe(id);
+    expect(trail(r)).toEqual(['waiting', 'connecting', 'open']);
+    const before = r.sent.length;
+    expect(r.g.handle(proposal(1, 'Carol', 9n))).toBe(false);
+    expect(r.g.handle(clientError('Carol', 9n))).toBe(false);
+    await tick();
+    expect([r.requests, r.shares, r.sent.length]).toEqual([[], [], before]);
+  });
+
+  it('a browse that waits still hears the decline of the peer when Get File turns off', async () => {
+    let on = true;
+    const r = rig({ enabled: () => on });
+    r.g.browse('Bob');
+    await tick();
+    on = false;
+    expect(r.g.handle(cancelFrom('Bob', RDV_CANCEL_DECLINED))).toBe(true);
+    await tick();
+    expect(trail(r)).toEqual(['waiting', 'declined']);
+    // With no browse and no share left, each message is left alone.
+    expect(r.g.handle(proposal(1, 'Carol', 9n))).toBe(false);
   });
 
   it('browse for a peer with a live browse returns the same id and sends no second proposal', async () => {
@@ -684,8 +719,21 @@ describe('the Get File part as the holder', () => {
     expect(r.sent).toEqual([cancelTo('Bob', 3n)]);
   });
 
+  it('a request that waits still hears the cancel of the peer when Get File turns off', async () => {
+    let on = true;
+    const r = rig({ enabled: () => on });
+    r.g.share(SOURCE);
+    r.g.handle(proposal(1));
+    await tick();
+    on = false;
+    expect(r.g.handle(cancelFrom('Bob', RDV_CANCEL_DECLINED))).toBe(true);
+    await tick();
+    expect(shareTrail(r)).toEqual(['asked', 'cancelled']);
+    expect(r.g.handle(proposal(1, 'Carol', 9n))).toBe(false);
+  });
+
   it('a part that is off refuses share, allow and refuse', async () => {
-    const r = rig({ enabled: false });
+    const r = rig({ enabled: () => false });
     expect(() => r.g.share(SOURCE)).toThrowError(expect.objectContaining(INVALID));
     expect(() => r.g.allow(SHARE)).toThrowError(expect.objectContaining(INVALID));
     await r.g.refuse(SHARE);

@@ -101,6 +101,15 @@ describe('formatting the screen name', () => {
     expect(h.client.state).toBe('online');
   });
 
+  it('announces the negotiated OService version on an Admin connection', async () => {
+    h = makeClient(fake, { timers, random: () => 0, oserviceVersion: 4 });
+    await h.signOn();
+    await h.client.formatScreenName('A Lice');
+    const versions = onAdmin().find(is(0x01, 0x17));
+    expect(u16s(versions?.body ?? new Uint8Array(0))).toEqual([0x0001, 4, 0x0007, 1]);
+    expect(fake.oserviceVersionOf('alice', 0)).toBe(4);
+  });
+
   it('emits self once whether the reply or the self info comes first', async () => {
     await h.signOn();
     for (const order of ['before', 'after'] as const) {

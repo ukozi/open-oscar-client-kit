@@ -32,8 +32,8 @@ export type TransfersDeps = {
   log: Logger;
   now: () => number;
   timers: TimerApi;
-  /** When false, the part ignores each message and refuses each command. */
-  enabled: boolean;
+  /** Read at each use. While false, the part ignores each offer and refuses each new transfer. A transfer that runs goes on. */
+  enabled: () => boolean;
   /** The offers of the session. Its owner resets it. */
   rendezvous: Rendezvous;
   /** Sends one ICBM 0x04/0x06 body on the BOS link. It rejects when the session is not online. */
@@ -97,7 +97,7 @@ export class Transfers {
 
   /** Offers the files and gives the id of the transfer. The first event comes before the result. */
   sendFiles(screenName: string, files: readonly OutgoingFile[]): string {
-    if (!this.deps.enabled || files.length === 0 || files.length > MAX_OFFER_FILES) throw invalid();
+    if (!this.deps.enabled() || files.length === 0 || files.length > MAX_OFFER_FILES) throw invalid();
     if (files.some((file) => !isSize(file.bytes) || file.name === '' || file.name.includes('\0'))) throw invalid();
     const bytes = files.reduce((sum, file) => sum + file.bytes, 0);
     const first = files[0];
@@ -144,17 +144,18 @@ export class Transfers {
 
   /** Takes each SNAC of the BOS link. The result is true for a message of the Send File service. */
   handle(snac: Snac): boolean {
-    if (!this.deps.enabled || snac.family !== FAMILY_ICBM) return false;
+    if (snac.family !== FAMILY_ICBM || (!this.deps.enabled() && this.transfers.size === 0)) return false;
     if (snac.subtype === ICBM_CLIENT_ERR) return this.refused(snac.body);
     if (snac.subtype !== ICBM_MSG_TO_CLIENT) return false;
     const capability = rendezvousCapability(snac.body);
     if (!capability || serviceOf(capability) !== 'send-file') return false;
     const message = parseRendezvous(snac.body);
+    const t = message ? this.transfers.get(this.idOf(message.from, message.cookie)) : undefined;
+    if (!t && !this.deps.enabled()) return false;
     if (!message) {
       this.deps.log.debug('ignored a file message of an unknown type');
       return true;
     }
-    const t = this.transfers.get(this.idOf(message.from, message.cookie));
     if (t) this.heard(t, message);
     else if (message.type === 'propose') this.proposed(message);
     else this.deps.log.debug('ignored a file message for no transfer of this session', { type: message.type });

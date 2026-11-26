@@ -2,7 +2,9 @@ export type OutgoingFile = {
   name: string;
   bytes: number;
   modifiedAt: number;          // seconds
-  /** Yields the file from the start. The client calls it two times: for the checksum, then to send. */
+  /** The OFT checksum of the whole file. When it is not known, the client reads the file one more time to get it. */
+  checksum?: number;
+  /** Yields the file from the start. The client calls it one time when `checksum` is given, else two times: for the checksum, then to send. */
   read(): AsyncIterable<Uint8Array>;
 };
 /** `name` is the name in the header of the file. The byte 0x01 in it divides folders. */

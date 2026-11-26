@@ -44,6 +44,10 @@ export const ROOM_CLOSE_SETTLE_MS = 2_000;
 /** Anyone can send an invite, and each needs an answer: past this many, Rooms drops a new one unanswered. */
 export const MAX_PENDING_INVITES = 16;
 export const INVITE_TEXT_MAX = 1024;
+/** Rooms forgets an invitation that it sent after this time. A decline that comes after it does nothing. */
+export const INVITED_TTL_MS = 3_600_000;
+/** The most invitations that Rooms keeps from those it sent. A new one makes Rooms forget the oldest. */
+export const MAX_INVITED = 64;
 
 export type RoomsDeps = {
   log: Logger;
@@ -133,7 +137,7 @@ function sendFailure(error: unknown): unknown {
 export class Rooms {
   private readonly held = new Map<string, Held>();
   private readonly joins = new Map<string, { join: Join; promise: Promise<RoomStatus> }>();
-  private readonly invited = new Map<bigint, { roomId: string; to: string }>();
+  private readonly invited = new Map<bigint, { roomId: string; to: string; at: number }>();
   private readonly invites = new Map<string, { cookie: bigint; from: string; key: string; at: number }>();
 
   private asking: Promise<boolean> | null = null;
@@ -221,7 +225,7 @@ export class Rooms {
     const held = this.held.get(roomId);
     if (held?.status.state !== 'joined' || !held.chat) throw this.unsent(held, new OscarError({ kind: 'local', code: 'not-in-room' }));
     const cookie = newCookie();
-    this.invited.set(cookie, { roomId, to: normalizeScreenName(screenName) });
+    this.remember(cookie, { roomId, to: normalizeScreenName(screenName), at: this.deps.now() });
     try {
       const body = encodeChatInvite(cookie, screenName, { exchange: held.status.exchange, cookie: held.cookie }, INVITE_TEXT);
       const reply = await ctx.link.requestMatching(FAMILY_ICBM, ICBM_MSG_TO_HOST, body, INVITE_ACK_TIMEOUT_MS, (snac) => isReplyTo(cookie, snac));
@@ -307,6 +311,7 @@ export class Rooms {
   }
 
   private declined(cancel: ChatInviteCancel): void {
+    this.forgetOldInvited();
     const sent = this.invited.get(cancel.cookie);
     if (!sent || sent.to !== cancel.from) {
       this.deps.log.debug('ignored a decline of no invitation of this session');
@@ -314,6 +319,24 @@ export class Rooms {
     }
     this.invited.delete(cancel.cookie);
     this.deps.emitDeclined({ roomId: sent.roomId, by: cancel.fromDisplay });
+  }
+
+  // The session can stay open for weeks, so the record of sent invitations must not grow without a limit.
+  private remember(cookie: bigint, sent: { roomId: string; to: string; at: number }): void {
+    this.forgetOldInvited();
+    for (const oldest of this.invited.keys()) {
+      if (this.invited.size < MAX_INVITED) break;
+      this.invited.delete(oldest);
+    }
+    this.invited.set(cookie, sent);
+  }
+
+  private forgetOldInvited(): void {
+    const now = this.deps.now();
+    for (const [cookie, sent] of this.invited) {
+      if (now - sent.at < INVITED_TTL_MS) break;
+      this.invited.delete(cookie);
+    }
   }
 
   private unsent(held: Held | undefined, error: unknown): unknown {

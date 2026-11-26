@@ -26,8 +26,8 @@ export type DirectImDeps = {
   log: Logger;
   now: () => number;
   timers: TimerApi;
-  /** When false, the part ignores each message and refuses each command. */
-  enabled: boolean;
+  /** Read at each use. While false, the part ignores each offer and refuses each new session. A session that runs goes on. */
+  enabled: () => boolean;
   /** The offers of the session. Its owner resets it. */
   rendezvous: Rendezvous;
   /** The name of this client, for the header of each frame. */
@@ -88,7 +88,7 @@ export class DirectIm {
 
   /** Offers Direct IM and gives the id of the session. A peer with a session that is live gets no second offer: the result is the id of that session. */
   open(screenName: string): string {
-    if (!this.deps.enabled) throw invalid();
+    if (!this.deps.enabled()) throw invalid();
     const live = this.withPeer(normalizeScreenName(screenName));
     if (live) return live.id;
     const s = this.add({ cookie: this.freshCookie(screenName), peer: screenName, role: 'offering', phase: 'meeting', proposal: null });
@@ -136,17 +136,18 @@ export class DirectIm {
 
   /** True for a message of the Direct IM service and for the client error of a peer about one. */
   handle(snac: Snac): boolean {
-    if (!this.deps.enabled || snac.family !== FAMILY_ICBM) return false;
+    if (snac.family !== FAMILY_ICBM || (!this.deps.enabled() && this.cookies.size === 0)) return false;
     if (snac.subtype === ICBM_CLIENT_ERR) return this.refused(snac.body);
     if (snac.subtype !== ICBM_MSG_TO_CLIENT) return false;
     const capability = rendezvousCapability(snac.body);
     if (!capability || serviceOf(capability) !== 'direct-im') return false;
     const message = parseRendezvous(snac.body);
+    const s = message ? this.cookies.get(this.idOf(message.from, message.cookie)) : undefined;
+    if (!s && !this.deps.enabled()) return false;
     if (!message) {
       this.deps.log.debug('ignored a direct im message of an unknown type');
       return true;
     }
-    const s = this.cookies.get(this.idOf(message.from, message.cookie));
     if (s) this.heard(s, message);
     else if (message.type === 'propose') this.proposed(message);
     else this.deps.log.debug('ignored a direct im message for no session', { type: message.type });

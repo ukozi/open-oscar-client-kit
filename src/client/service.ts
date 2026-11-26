@@ -3,6 +3,7 @@ import type { ServiceResolver } from '../wire/chatnav.js';
 import { decideRedirect } from '../wire/connection.js';
 import {
   FAMILY_OSERVICE,
+  FOOD_GROUP_VERSION,
   OSERVICE_ERR,
   OSERVICE_SERVICE_REQUEST,
   OSERVICE_SERVICE_RESPONSE,
@@ -15,6 +16,14 @@ import type { BosLink } from './bos-link.js';
 import { OscarError } from './errors.js';
 import { redirectMode } from './connect-options.js';
 import type { ServerAddress } from './sign-on.js';
+
+/**
+ * The version of each food group that a service connection announces.
+ * OService has the version that the BOS connection negotiated, because a server can keep one set of versions for all the connections of a session.
+ */
+export function serviceVersions(link: BosLink): (family: number) => number {
+  return (family) => (family === FAMILY_OSERVICE ? link.oserviceVersion : FOOD_GROUP_VERSION);
+}
 
 /**
  * The service request on the BOS connection (0x01/0x04) and where its answer says to connect: for ChatNav, a room, the icon service.
